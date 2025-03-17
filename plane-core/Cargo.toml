@@ -1,0 +1,9 @@
+[package]
+name = "plane-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+heapless = "0.8.0"
+postcard = "1.1.1"
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }

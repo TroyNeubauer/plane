@@ -1,0 +1,12 @@
+[package]
+name = "gcs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+clap = { version = "4.5.32", features = ["derive"] }
+gilrs = "0.11.0"
+plane-core = { path = "../plane-core" }
+postcard = "1.1.1"
+serialport = "4.7.0"

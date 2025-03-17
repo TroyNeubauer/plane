@@ -5,11 +5,14 @@ set -e
 BUILD_TYPE=release
 MOUNT_POINT="/home/troy/mnt"
 TARGET="thumbv6m-none-eabi"
-BINARY_NAME=${1:-plane}
+BINARY_NAME=${1:-flight-controller}
 
 # Build the project
 echo "Building project..."
-cargo build --bin $BINARY_NAME --${BUILD_TYPE}
+
+pushd ./flight-controller
+cargo build --${BUILD_TYPE}
+popd
 
 # Locate the Pico device (128MB)
 echo "Searching for Pico device..."
@@ -35,4 +38,7 @@ sync
 sudo umount $MOUNT_POINT
 
 echo "Upload complete!"
+
+sleep 2
+sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00
 
