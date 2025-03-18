@@ -9,7 +9,7 @@ use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
-use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, SetDutyCycle};
+use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmOutput, SetDutyCycle};
 use embassy_rp::uart::{self, UartRx, UartTx};
 use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
@@ -51,10 +51,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, 0.02, 0.10);
     let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, 0.02, 0.10);
-    let mut elevator = unsafe {
-         RawPwm::new(p.PWM_SLICE3.clone_unchecked(), p.PIN_6, 50, 64, 0.02, 0.10)
-    };
-    let mut prop = RawPwm::new_b(p.PWM_SLICE3, p.PIN_7, 50, 64, 0.02, 0.10);
+    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, 0.02, 0.10);
 
     left_aleron.set_from_axis_control(0.0);
     right_aleron.set_from_axis_control(0.0);
@@ -99,7 +96,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 }
 
 pub struct RawPwm<'a> {
-    inner: Pwm<'a>,
+    inner: PwmOutput<'a>,
     /// Number of ticks in the period
     period: u16,
     min_percent: f32,
@@ -127,7 +124,7 @@ impl<'a> RawPwm<'a> {
         c.divider = divider.into();
 
         Self {
-            inner: Pwm::new_output_a(slice, pin, c.clone()),
+            inner: Pwm::new_output_a(slice, pin, c.clone()).split().0.expect("When just making channel a it should have it"),
             period,
             min_percent,
             max_percent,
@@ -142,7 +139,7 @@ impl<'a> RawPwm<'a> {
         divider: u8,
         min_percent: f32,
         max_percent: f32,
-    ) -> Self {
+    ) -> (Self, Self) {
         // If we aim for a specific frequency, here is how we can calculate the top value.
         // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
         // Every such wraparound is one PWM cycle. So here is how we get 50KHz:
@@ -154,12 +151,18 @@ impl<'a> RawPwm<'a> {
         c.top = period;
         c.divider = divider.into();
 
-        Self {
-            inner: Pwm::new_output_ab(slice, pin_a, pin_b, c.clone()),
+        let portions = Pwm::new_output_ab(slice, pin_a, pin_b, c.clone()).split();
+        (Self {
+            inner: portions.0.expect("PWM Channel A"),
             period,
             min_percent,
             max_percent,
-        }
+        }, Self {
+            inner: portions.1.expect("PWM Channel B"),
+            period,
+            min_percent,
+            max_percent,
+        })
     }
 
     pub fn set_pwm_percent(&mut self, percent: f32) {
