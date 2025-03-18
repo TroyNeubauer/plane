@@ -10,7 +10,7 @@ use embassy_executor::Spawner;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
 use embassy_rp::pwm::{self, ChannelAPin, Pwm, SetDutyCycle};
-use embassy_rp::uart::{self, UartRx};
+use embassy_rp::uart::{self, UartRx, UartTx};
 use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_time::Timer;
@@ -20,14 +20,8 @@ use log::{error, info};
 use plane_core::{ControlState, FcInput, MAGIC};
 
 bind_interrupts!(struct Irqs {
-    USBCTRL_IRQ => usb::InterruptHandler<USB>;
     UART1_IRQ => uart::InterruptHandler<UART1>;
 });
-
-#[embassy_executor::task]
-async fn logger_task(driver: Driver<'static, USB>) {
-    embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
-}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -40,14 +34,13 @@ async fn main(spawner: Spawner) {
     }
 }
 
+// async fn logger_task<'d, T: uart::Instance, M: uart::Mode>(uart: UartTx<'d, T, M>) {
+//
+// }
+
 async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
     let mut led = Output::new(p.PIN_25, Level::Low);
-
-    let driver = Driver::new(p.USB, Irqs);
-    spawner
-        .spawn(logger_task(driver))
-        .map_err(|_| "failed to spawn logger task")?;
 
     Timer::after_secs(3).await;
     // Start tasks
@@ -59,11 +52,18 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, 0.02, 0.10);
     let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, 0.02, 0.10);
 
+    left_aleron.set_from_axis_control(0.0);
+    right_aleron.set_from_axis_control(0.0);
+
     let mut config = uart::Config::default();
     config.baudrate = 57600;
 
-    // let mut uart_tx = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH0, config);
+    // let uart_tx = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH0, config);
     let mut uart_rx = UartRx::new(p.UART1, p.PIN_5, Irqs, p.DMA_CH1, config);
+
+    // spawner
+    //     .spawn(logger_task(uart_tx))
+    //     .map_err(|_| "failed to spawn logger task")?;
 
     let mut state = ControlState::default();
 
