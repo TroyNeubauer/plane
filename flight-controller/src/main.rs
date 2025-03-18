@@ -7,17 +7,17 @@
 
 use defmt_rtt as _;
 use embassy_executor::Spawner;
-use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
-use embassy_rp::pwm::{self, Pwm, SetDutyCycle};
+use embassy_rp::pwm::{self, ChannelAPin, Pwm, SetDutyCycle};
 use embassy_rp::uart::{self, UartRx};
 use embassy_rp::usb::{self, Driver};
+use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_time::Timer;
 use log::warn;
 use log::{error, info};
 
-use plane_core::{FcInput, MAGIC};
+use plane_core::{ControlState, FcInput, MAGIC};
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => usb::InterruptHandler<USB>;
@@ -52,15 +52,20 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     Timer::after_secs(3).await;
     // Start tasks
 
-    spawner
-        .spawn(pwm_set_dutycycle(p.PWM_SLICE2, p.PIN_4, led))
-        .map_err(|_| "failed to spawn logger task")?;
+    // spawner
+    //     .spawn(pwm_set_dutycycle(p.PWM_SLICE2, p.PIN_4, led))
+    //     .map_err(|_| "failed to spawn logger task")?;
+
+    let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, 0.02, 0.10);
+    let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, 0.02, 0.10);
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
 
     // let mut uart_tx = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH0, config);
     let mut uart_rx = UartRx::new(p.UART1, p.PIN_5, Irqs, p.DMA_CH1, config);
+
+    let mut state = ControlState::default();
 
     log::info!("Reading...");
     loop {
@@ -74,9 +79,74 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
             let payload = &buf[1..];
             if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
                 info!("{cmd:?}");
+                state.pitch = cmd.controls.pitch;
+                state.yaw = cmd.controls.yaw;
+                state.roll = cmd.controls.roll;
+                state.throttle = cmd.controls.throttle;
+
+                left_aleron.set_from_axis_control(-state.roll);
+                right_aleron.set_from_axis_control(state.roll);
             }
         }
     }
+}
+
+pub struct RawPwm<'a> {
+    inner: Pwm<'a>,
+    /// Number of ticks in the period
+    period: u16,
+    min_percent: f32,
+    max_percent: f32,
+}
+
+impl<'a> RawPwm<'a> {
+    pub fn new<T: embassy_rp::pwm::Slice>(
+        slice: impl Peripheral<P = T> + 'a,
+        pin: impl Peripheral<P = impl ChannelAPin<T>> + 'a,
+        duty_cycle_hz: u32,
+        divider: u8,
+        min_percent: f32,
+        max_percent: f32,
+    ) -> Self {
+        // If we aim for a specific frequency, here is how we can calculate the top value.
+        // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
+        // Every such wraparound is one PWM cycle. So here is how we get 50KHz:
+        let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
+        let period = (clock_freq_hz / (duty_cycle_hz * divider as u32)) as u16 - 1;
+        info!("divider: {divider}, period: {period}");
+
+        let mut c = pwm::Config::default();
+        c.top = period;
+        c.divider = divider.into();
+
+        Self {
+            inner: Pwm::new_output_a(slice, pin, c.clone()),
+            period,
+            min_percent,
+            max_percent,
+        }
+    }
+
+    pub fn set_pwm_percent(&mut self, percent: f32) {
+        let percent = percent.clamp(self.min_percent, self.max_percent);
+        let ticks = (self.period as f32 * percent) as u16;
+        self.inner.set_duty_cycle(ticks);
+    }
+
+    // Axis is [-1..1]
+    pub fn set_from_axis_control(&mut self, axis: f32) {
+        let f = (axis + 1.0) / 2.0;
+        let percent = self.min_percent + f * (self.max_percent - self.min_percent);
+
+        let ticks = (self.period as f32 * percent) as u16;
+        self.inner.set_duty_cycle(ticks);
+        //
+    }
+}
+
+pub struct PwmControlSurface<'a> {
+    // 19,530 * 2
+    inner: RawPwm<'a>,
 }
 
 /// Demonstrate PWM by setting duty cycle
@@ -84,33 +154,23 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 /// Using GP4 in Slice2, make sure to use an appropriate resistor.
 #[embassy_executor::task]
 async fn pwm_set_dutycycle(slice2: PWM_SLICE2, pin4: PIN_4, mut led: Output<'static>) {
-    // If we aim for a specific frequency, here is how we can calculate the top value.
-    // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
-    // Every such wraparound is one PWM cycle. So here is how we get 50KHz:
-    let desired_freq_hz = 50;
-    let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
-    let divider = 128u8;
-    let period = (clock_freq_hz / (desired_freq_hz * divider as u32)) as u16 - 1;
-    info!("clock_freq_hz: {clock_freq_hz}, period: {period}");
+    let mut pwm = RawPwm::new(slice2, pin4, 50, 64, 0.02, 0.10);
 
-    let mut c = pwm::Config::default();
-    c.top = period;
-    c.divider = divider.into();
+    let min = -1.0;
+    let max = 1.0;
+    let rate = 1.0;
 
-    let mut pwm = Pwm::new_output_a(slice2, pin4, c.clone());
-
+    let mut value = min;
     loop {
-        pwm.set_duty_cycle(10 * c.top / 100).unwrap();
-        Timer::after_secs(1).await;
+        if value > max {
+            value = min;
+        }
+        pwm.set_from_axis_control(value);
+        info!("Value: {value}");
         led.toggle();
 
-        pwm.set_duty_cycle(15 * c.top / 100).unwrap();
-        Timer::after_secs(1).await;
-        led.toggle();
-
-        pwm.set_duty_cycle(20 * c.top / 100).unwrap();
-        Timer::after_secs(1).await;
-        led.toggle();
+        value += rate * (1.0 / 50.0);
+        Timer::after_millis(50).await;
     }
 }
 

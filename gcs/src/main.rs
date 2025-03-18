@@ -83,11 +83,11 @@ impl Default for ControlMapping {
 pub struct Args {
     #[clap(short = 'd', value_parser, default_value = "0.05")]
     deadband: f32,
-    #[clap(value_parser, default_value = "100.0")]
+    #[clap(value_parser, default_value = "150.0")]
     filter_rate_hz: f32,
-    #[clap(value_parser, default_value = "45.0")]
+    #[clap(value_parser, default_value = "50.0")]
     send_rate_hz: f32,
-    #[clap(value_parser, default_value = "0.8")]
+    #[clap(value_parser, default_value = "0.7")]
     alpha: f32,
     #[clap(value_parser, default_value = "1.6")]
     exponent: f32,
