@@ -35,11 +35,11 @@
             gcc-arm-embedded
             openocd
             minicom
-            udev
+            #udev
             pkg-config
           ];
 
-          LD_LIBRARY_PATH="${pkgs.udev}/lib";
+          #LD_LIBRARY_PATH="${pkgs.udev}/lib";
         };
       in
       {

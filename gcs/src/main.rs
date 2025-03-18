@@ -107,10 +107,10 @@ fn main() -> Result<()> {
 
     let mut gilrs = Gilrs::new().unwrap();
 
-    let _ = gilrs
+    /*let _ = gilrs
         .gamepads()
         .next()
-        .ok_or_else(|| anyhow!("No gamepads detected"))?;
+        .ok_or_else(|| anyhow!("No gamepads detected"))?;*/
 
     let port_info = 'outer: loop {
         for info in serialport::available_ports().context("Failed to list serial ports")? {
@@ -127,7 +127,7 @@ fn main() -> Result<()> {
 
     println!("Opening: {port_info:?}");
 
-    let builder = serialport::new(port_info.port_name, 57600);
+    let builder = serialport::new("/dev/tty.usbserial-B000IV2L"/*port_info.port_name*/, 57600);
     let mut port = builder.open().context("Failed to open serial port")?;
 
     const MIN_VAL: f32 = 0.001;

@@ -9,7 +9,7 @@ use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
-use embassy_rp::pwm::{self, ChannelAPin, Pwm, SetDutyCycle};
+use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, SetDutyCycle};
 use embassy_rp::uart::{self, UartRx, UartTx};
 use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
@@ -51,9 +51,14 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, 0.02, 0.10);
     let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, 0.02, 0.10);
+    let mut elevator = unsafe {
+         RawPwm::new(p.PWM_SLICE3.clone_unchecked(), p.PIN_6, 50, 64, 0.02, 0.10)
+    };
+    let mut prop = RawPwm::new_b(p.PWM_SLICE3, p.PIN_7, 50, 64, 0.02, 0.10);
 
     left_aleron.set_from_axis_control(0.0);
     right_aleron.set_from_axis_control(0.0);
+    elevator.set_from_axis_control(0.0);
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
@@ -85,7 +90,9 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 state.throttle = cmd.controls.throttle;
 
                 left_aleron.set_from_axis_control(-state.roll);
-                right_aleron.set_from_axis_control(state.roll);
+                right_aleron.set_from_axis_control(-state.roll);
+                elevator.set_from_axis_control(-state.pitch);
+                prop.set_from_axis_control(state.throttle);
             }
         }
     }
@@ -121,6 +128,34 @@ impl<'a> RawPwm<'a> {
 
         Self {
             inner: Pwm::new_output_a(slice, pin, c.clone()),
+            period,
+            min_percent,
+            max_percent,
+        }
+    }
+
+    pub fn new_ab<T: embassy_rp::pwm::Slice>(
+        slice: impl Peripheral<P = T> + 'a,
+        pin_a: impl Peripheral<P = impl ChannelAPin<T>> + 'a,
+        pin_b: impl Peripheral<P = impl ChannelBPin<T>> + 'a,
+        duty_cycle_hz: u32,
+        divider: u8,
+        min_percent: f32,
+        max_percent: f32,
+    ) -> Self {
+        // If we aim for a specific frequency, here is how we can calculate the top value.
+        // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
+        // Every such wraparound is one PWM cycle. So here is how we get 50KHz:
+        let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
+        let period = (clock_freq_hz / (duty_cycle_hz * divider as u32)) as u16 - 1;
+        info!("divider: {divider}, period: {period}");
+
+        let mut c = pwm::Config::default();
+        c.top = period;
+        c.divider = divider.into();
+
+        Self {
+            inner: Pwm::new_output_ab(slice, pin_a, pin_b, c.clone()),
             period,
             min_percent,
             max_percent,
