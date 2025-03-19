@@ -4,16 +4,18 @@ use plane_core::TrimConfig;
 use ratatui::{crossterm::{event::{self as tui_event, Event as TUIEvent}, terminal}, layout::{Constraint, Layout}, text::Text, widgets::{Block, List, Widget}, DefaultTerminal, Frame};
 
 #[derive(Debug, Default, Clone)]
-enum ControlSurface {
+enum TrimItem {
     #[default]
     Elevator,
     LeftAileron,
-    RightAileron
+    RightAileron,
+    RollRange,
+    ElevatorRange,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct TrimAdjuster {
-    currently_editing: ControlSurface,
+    currently_editing: TrimItem,
     config: TrimConfig
 }
 
@@ -21,13 +23,15 @@ impl Widget for TrimAdjuster {
     fn render(self, area0: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized {
-            let block = Block::bordered().title(format!("Editing {:?}", self.currently_editing));
+            let block = Block::bordered().title(format!("Editing {:?} (Use dpad left/right to edit other value, dpad up/down to inc/dec)", self.currently_editing));
             let area = block.inner(area0);
             block.render(area0, buf);
             Text::from(match self.currently_editing {
-                ControlSurface::Elevator => self.config.elevator,
-                ControlSurface::LeftAileron => self.config.left_aileron,
-                ControlSurface::RightAileron => self.config.right_aileron,
+                TrimItem::Elevator => self.config.elevator,
+                TrimItem::LeftAileron => self.config.left_aileron,
+                TrimItem::RightAileron => self.config.right_aileron,
+                TrimItem::RollRange => self.config.roll_range,
+                TrimItem::ElevatorRange => self.config.elevator_range,
             }.to_string()).render(area, buf);
     }
 }
@@ -83,56 +87,80 @@ impl Tui {
 
     pub fn more_trim(&mut self) {
         match self.trim.currently_editing {
-            ControlSurface::Elevator => {
+            TrimItem::Elevator => {
                 self.trim.config.elevator += 0.1;
             },
-            ControlSurface::LeftAileron => {
+            TrimItem::LeftAileron => {
                 self.trim.config.left_aileron += 0.1;
             },
-            ControlSurface::RightAileron => {
+            TrimItem::RightAileron => {
                 self.trim.config.right_aileron += 0.1;
+            },
+            TrimItem::RollRange => {
+                self.trim.config.roll_range += 0.1;
+            }
+            TrimItem::ElevatorRange => {
+                self.trim.config.elevator_range += 0.1;
             }
         }
     }
 
     pub fn less_trim(&mut self) {
         match self.trim.currently_editing {
-            ControlSurface::Elevator => {
+            TrimItem::Elevator => {
                 self.trim.config.elevator -= 0.05;
             },
-            ControlSurface::LeftAileron => {
+            TrimItem::LeftAileron => {
                 self.trim.config.left_aileron -= 0.05;
             },
-            ControlSurface::RightAileron => {
+            TrimItem::RightAileron => {
                 self.trim.config.right_aileron -= 0.05;
+            },
+            TrimItem::RollRange => {
+                self.trim.config.roll_range -= 0.05;
+            }
+            TrimItem::ElevatorRange => {
+                self.trim.config.elevator_range -= 0.05;
             }
         }
     }
 
     pub fn next_trim(&mut self) {
         match self.trim.currently_editing {
-            ControlSurface::Elevator => {
-                self.trim.currently_editing = ControlSurface::LeftAileron;
+            TrimItem::Elevator => {
+                self.trim.currently_editing = TrimItem::LeftAileron;
             },
-            ControlSurface::LeftAileron => {
-                self.trim.currently_editing = ControlSurface::RightAileron;
+            TrimItem::LeftAileron => {
+                self.trim.currently_editing = TrimItem::RightAileron;
             },
-            ControlSurface::RightAileron => {
-                self.trim.currently_editing = ControlSurface::Elevator;
+            TrimItem::RightAileron => {
+                self.trim.currently_editing = TrimItem::RollRange;
+            },
+            TrimItem::RollRange => {
+                self.trim.currently_editing = TrimItem::ElevatorRange;
+            }
+            TrimItem::ElevatorRange => {
+                self.trim.currently_editing = TrimItem::Elevator;
             }
         }
     }
 
     pub fn previous_trim(&mut self) {
         match self.trim.currently_editing {
-            ControlSurface::Elevator => {
-                self.trim.currently_editing = ControlSurface::RightAileron;
+            TrimItem::LeftAileron => {
+                self.trim.currently_editing = TrimItem::Elevator;
             },
-            ControlSurface::LeftAileron => {
-                self.trim.currently_editing = ControlSurface::Elevator;
+            TrimItem::RightAileron => {
+                self.trim.currently_editing = TrimItem::LeftAileron;
             },
-            ControlSurface::RightAileron => {
-                self.trim.currently_editing = ControlSurface::LeftAileron;
+            TrimItem::RollRange => {
+                self.trim.currently_editing = TrimItem::RightAileron;
+            }
+            TrimItem::ElevatorRange => {
+                self.trim.currently_editing = TrimItem::RollRange;
+            }
+            TrimItem::Elevator => {
+                self.trim.currently_editing = TrimItem::ElevatorRange;
             }
         }
     }

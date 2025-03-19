@@ -38,6 +38,8 @@ async fn main(spawner: Spawner) {
 //
 // }
 
+const MAX_PERC_DFL: f32 = 0.02;
+const MIN_PERC_DFL: f32 = 0.10;
 async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
     let mut led = Output::new(p.PIN_25, Level::Low);
@@ -49,9 +51,9 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     //     .spawn(pwm_set_dutycycle(p.PWM_SLICE2, p.PIN_4, led))
     //     .map_err(|_| "failed to spawn logger task")?;
 
-    let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, 0.02, 0.10);
-    let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, 0.02, 0.10);
-    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, 0.02, 0.10);
+    let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+    let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
 
     left_aleron.set_from_axis_control(0.0);
     right_aleron.set_from_axis_control(0.0);
@@ -72,7 +74,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let mut trim_config: TrimConfig = TrimConfig::default();
     log::info!("Reading...");
     loop {
-        let mut buf = [0; 32];
+        let mut buf = [0; 40];
         if let Err(e) = uart_rx.read(&mut buf).await {
             warn!("Failed to read data: {e:?}");
         }
@@ -87,10 +89,17 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 state.roll = cmd.controls.roll;
                 state.throttle = cmd.controls.throttle;
 
-                trim_config = cmd.trim;
+
+                if trim_config != cmd.trim {
+                    elevator.max_percent = MAX_PERC_DFL + (trim_config.elevator_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    left_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    right_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                }
                 
-                left_aleron.set_from_axis_control(-state.roll - trim_config.left_aileron);
-                right_aleron.set_from_axis_control(-state.roll - trim_config.right_aileron);
+                trim_config = cmd.trim;
+
+                left_aleron.set_from_axis_control(-state.roll + trim_config.left_aileron);
+                right_aleron.set_from_axis_control(-state.roll + trim_config.right_aileron);
                 elevator.set_from_axis_control(-state.pitch - trim_config.elevator);
                 prop.set_from_axis_control(state.throttle);
             }
@@ -102,8 +111,8 @@ pub struct RawPwm<'a> {
     inner: PwmOutput<'a>,
     /// Number of ticks in the period
     period: u16,
-    min_percent: f32,
-    max_percent: f32,
+    pub min_percent: f32,
+    pub max_percent: f32,
 }
 
 impl<'a> RawPwm<'a> {
