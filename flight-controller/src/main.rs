@@ -7,6 +7,7 @@
 
 use defmt_rtt as _;
 use embassy_executor::Spawner;
+use embassy_rp::flash::{Blocking, Flash, ERASE_SIZE};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
 use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmOutput, SetDutyCycle};
@@ -38,11 +39,24 @@ async fn main(spawner: Spawner) {
 //
 // }
 
+const ADDR_OFFSET: u32 = 0x100000;
+const FLASH_SIZE: usize = 2 * 1024 * 1024;
+
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
 async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
     let mut led = Output::new(p.PIN_25, Level::Low);
+
+    let mut memory = Flash::<_, Blocking, FLASH_SIZE>::new_blocking(p.FLASH);
+    let mut buff = [0u8; ERASE_SIZE];
+    memory.blocking_read(ADDR_OFFSET, &mut buff);
+    let mut trim_config: TrimConfig = if buff[0] == 0xba {
+        postcard::from_bytes::<TrimConfig>(&buff[1..]).expect("has trim config")
+    } else {
+        TrimConfig::default()
+    };
+    
 
     Timer::after_secs(3).await;
     // Start tasks
@@ -71,7 +85,6 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut state = ControlState::default();
 
-    let mut trim_config: TrimConfig = TrimConfig::default();
     log::info!("Reading...");
     loop {
         let mut buf = [0; 40];
@@ -90,13 +103,25 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 state.throttle = cmd.controls.throttle;
 
 
-                if trim_config != cmd.trim {
+                if cmd.trim.elevator != 0. ||  cmd.trim.left_aileron != 0. || cmd.trim.right_aileron != 0. || cmd.trim.elevator_range != 0. || cmd.trim.roll_range != 0. {
+
+                    trim_config.elevator += cmd.trim.elevator;
+                    trim_config.left_aileron += cmd.trim.left_aileron;
+                    trim_config.right_aileron += cmd.trim.right_aileron;
+                    trim_config.elevator_range += cmd.trim.elevator_range;
+                    trim_config.roll_range += cmd.trim.roll_range;
+
                     elevator.max_percent = MAX_PERC_DFL + (trim_config.elevator_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                     left_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                     right_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    memory.blocking_erase(ADDR_OFFSET, ADDR_OFFSET + ERASE_SIZE as u32);
+
+                    let mut buff = [0u8; ERASE_SIZE];
+                    buff[0] = 0xba;
+                    postcard::to_slice(&trim_config, &mut buff[1..]);
+                    memory.blocking_write(ADDR_OFFSET, &buff);
                 }
                 
-                trim_config = cmd.trim;
 
                 left_aleron.set_from_axis_control(-state.roll + trim_config.left_aileron);
                 right_aleron.set_from_axis_control(-state.roll + trim_config.right_aileron);

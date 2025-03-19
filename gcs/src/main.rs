@@ -199,7 +199,7 @@ fn main() -> Result<()> {
             if let EventType::Disconnected = &event {
                 tui.log("Controller disconnected. Exiting");
                 let Ok(bytes) = packet_for_input(&FcInput {
-                    trim: tui.trim(),
+                    trim: tui.get_and_reset_trim(),
                     controls: Default::default(),
                     armed: false,
                 })
@@ -262,7 +262,7 @@ fn main() -> Result<()> {
 
             last_state_sent = filtered_state.clone();
             let Ok(bytes) = packet_for_input(&FcInput {
-                trim: tui.trim(),
+                trim: tui.get_and_reset_trim(),
                 controls: filtered_state.clone(),
                 armed,
             })

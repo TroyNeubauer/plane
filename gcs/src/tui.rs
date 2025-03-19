@@ -165,8 +165,8 @@ impl Tui {
         }
     }
 
-    pub fn trim(&self) -> TrimConfig {
-        self.trim.config.clone()
+    pub fn get_and_reset_trim(&mut self) -> TrimConfig {
+        std::mem::take(&mut self.trim.config)
     }
 }
 
