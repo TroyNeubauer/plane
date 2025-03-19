@@ -31,12 +31,21 @@ impl ControlState {
     }
 }
 
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TrimConfig {
+    pub elevator: f32,
+    pub left_aileron: f32,
+    pub right_aileron: f32,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct FcInput {
+    pub trim: TrimConfig,
     pub controls: ControlState,
     pub armed: bool,
 }
 
-pub const MSG_LEN: usize = 20;
+pub const MSG_LEN: usize = 32;
 
 pub const MAGIC: u8 = 0xFC;

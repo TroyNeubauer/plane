@@ -9,4 +9,5 @@ clap = { version = "4.5.32", features = ["derive"] }
 gilrs = "0.11.0"
 plane-core = { path = "../plane-core" }
 postcard = "1.1.1"
+ratatui = "0.29.0"
 serialport = "4.7.0"

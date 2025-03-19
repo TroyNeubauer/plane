@@ -17,7 +17,7 @@ use embassy_time::Timer;
 use log::warn;
 use log::{error, info};
 
-use plane_core::{ControlState, FcInput, MAGIC};
+use plane_core::{ControlState, FcInput, TrimConfig, MAGIC};
 
 bind_interrupts!(struct Irqs {
     UART1_IRQ => uart::InterruptHandler<UART1>;
@@ -69,9 +69,10 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut state = ControlState::default();
 
+    let mut trim_config: TrimConfig = TrimConfig::default();
     log::info!("Reading...");
     loop {
-        let mut buf = [0; 20];
+        let mut buf = [0; 32];
         if let Err(e) = uart_rx.read(&mut buf).await {
             warn!("Failed to read data: {e:?}");
         }
@@ -86,9 +87,11 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 state.roll = cmd.controls.roll;
                 state.throttle = cmd.controls.throttle;
 
-                left_aleron.set_from_axis_control(-state.roll);
-                right_aleron.set_from_axis_control(-state.roll);
-                elevator.set_from_axis_control(-state.pitch);
+                trim_config = cmd.trim;
+                
+                left_aleron.set_from_axis_control(-state.roll - trim_config.left_aileron);
+                right_aleron.set_from_axis_control(-state.roll - trim_config.right_aileron);
+                elevator.set_from_axis_control(-state.pitch - trim_config.elevator);
                 prop.set_from_axis_control(state.throttle);
             }
         }
