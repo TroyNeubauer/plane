@@ -7,17 +7,16 @@
 
 use defmt_rtt as _;
 use embassy_executor::Spawner;
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
-use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmOutput, SetDutyCycle};
-use embassy_rp::uart::{self, UartRx, UartTx};
-use embassy_rp::usb::{self, Driver};
+use embassy_rp::gpio::Output;
+use embassy_rp::peripherals::UART1;
+use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmError, PwmOutput, SetDutyCycle};
+use embassy_rp::uart::{self, UartRx};
 use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_time::Timer;
 use log::warn;
 use log::{error, info};
 
-use plane_core::{ControlState, FcInput, TrimConfig, MAGIC};
+use plane_core::{ControlState, FcInput, MAGIC, TrimConfig};
 
 bind_interrupts!(struct Irqs {
     UART1_IRQ => uart::InterruptHandler<UART1>;
@@ -40,24 +39,29 @@ async fn main(spawner: Spawner) {
 
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
-async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
+async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
-    let mut led = Output::new(p.PIN_25, Level::Low);
+    // pi pico visible LED
+    // let led = Output::new(p.PIN_25, Level::Low);
 
+    // Wait for us to connect to serial if viewing logs
     Timer::after_secs(3).await;
-    // Start tasks
-
-    // spawner
-    //     .spawn(pwm_set_dutycycle(p.PWM_SLICE2, p.PIN_4, led))
-    //     .map_err(|_| "failed to spawn logger task")?;
 
     let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
     let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
-    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+    let (mut elevator, mut prop) = RawPwm::new_ab(
+        p.PWM_SLICE3,
+        p.PIN_6,
+        p.PIN_7,
+        50,
+        64,
+        MIN_PERC_DFL,
+        MAX_PERC_DFL,
+    );
 
-    left_aleron.set_from_axis_control(0.0);
-    right_aleron.set_from_axis_control(0.0);
-    elevator.set_from_axis_control(0.0);
+    let _ = left_aleron.set_from_axis_control(0.0);
+    let _ = right_aleron.set_from_axis_control(0.0);
+    let _ = elevator.set_from_axis_control(0.0);
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
@@ -89,19 +93,21 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 state.roll = cmd.controls.roll;
                 state.throttle = cmd.controls.throttle;
 
-
                 if trim_config != cmd.trim {
-                    elevator.max_percent = MAX_PERC_DFL + (trim_config.elevator_range * (MAX_PERC_DFL - MIN_PERC_DFL));
-                    left_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
-                    right_aleron.max_percent = MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    elevator.max_percent =
+                        MAX_PERC_DFL + (trim_config.elevator_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    left_aleron.max_percent =
+                        MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                    right_aleron.max_percent =
+                        MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                 }
-                
+
                 trim_config = cmd.trim;
 
-                left_aleron.set_from_axis_control(-state.roll + trim_config.left_aileron);
-                right_aleron.set_from_axis_control(-state.roll + trim_config.right_aileron);
-                elevator.set_from_axis_control(-state.pitch - trim_config.elevator);
-                prop.set_from_axis_control(state.throttle);
+                let _ = left_aleron.set_from_axis_control(-state.roll + trim_config.left_aileron);
+                let _ = right_aleron.set_from_axis_control(-state.roll + trim_config.right_aileron);
+                let _ = elevator.set_from_axis_control(-state.pitch - trim_config.elevator);
+                let _ = prop.set_from_axis_control(state.throttle);
             }
         }
     }
@@ -136,7 +142,10 @@ impl<'a> RawPwm<'a> {
         c.divider = divider.into();
 
         Self {
-            inner: Pwm::new_output_a(slice, pin, c.clone()).split().0.expect("When just making channel a it should have it"),
+            inner: Pwm::new_output_a(slice, pin, c.clone())
+                .split()
+                .0
+                .expect("When just making channel a it should have it"),
             period,
             min_percent,
             max_percent,
@@ -164,63 +173,35 @@ impl<'a> RawPwm<'a> {
         c.divider = divider.into();
 
         let portions = Pwm::new_output_ab(slice, pin_a, pin_b, c.clone()).split();
-        (Self {
-            inner: portions.0.expect("PWM Channel A"),
-            period,
-            min_percent,
-            max_percent,
-        }, Self {
-            inner: portions.1.expect("PWM Channel B"),
-            period,
-            min_percent,
-            max_percent,
-        })
+        (
+            Self {
+                inner: portions.0.expect("PWM Channel A"),
+                period,
+                min_percent,
+                max_percent,
+            },
+            Self {
+                inner: portions.1.expect("PWM Channel B"),
+                period,
+                min_percent,
+                max_percent,
+            },
+        )
     }
 
-    pub fn set_pwm_percent(&mut self, percent: f32) {
+    pub fn set_pwm_percent(&mut self, percent: f32) -> Result<(), PwmError> {
         let percent = percent.clamp(self.min_percent, self.max_percent);
         let ticks = (self.period as f32 * percent) as u16;
-        self.inner.set_duty_cycle(ticks);
+        self.inner.set_duty_cycle(ticks)
     }
 
     // Axis is [-1..1]
-    pub fn set_from_axis_control(&mut self, axis: f32) {
+    pub fn set_from_axis_control(&mut self, axis: f32) -> Result<(), PwmError> {
         let f = (axis + 1.0) / 2.0;
         let percent = self.min_percent + f * (self.max_percent - self.min_percent);
 
         let ticks = (self.period as f32 * percent) as u16;
-        self.inner.set_duty_cycle(ticks);
-        //
-    }
-}
-
-pub struct PwmControlSurface<'a> {
-    // 19,530 * 2
-    inner: RawPwm<'a>,
-}
-
-/// Demonstrate PWM by setting duty cycle
-///
-/// Using GP4 in Slice2, make sure to use an appropriate resistor.
-#[embassy_executor::task]
-async fn pwm_set_dutycycle(slice2: PWM_SLICE2, pin4: PIN_4, mut led: Output<'static>) {
-    let mut pwm = RawPwm::new(slice2, pin4, 50, 64, 0.02, 0.10);
-
-    let min = -1.0;
-    let max = 1.0;
-    let rate = 1.0;
-
-    let mut value = min;
-    loop {
-        if value > max {
-            value = min;
-        }
-        pwm.set_from_axis_control(value);
-        info!("Value: {value}");
-        led.toggle();
-
-        value += rate * (1.0 / 50.0);
-        Timer::after_millis(50).await;
+        self.inner.set_duty_cycle(ticks)
     }
 }
 
