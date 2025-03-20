@@ -1,9 +1,9 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Parser;
 use gilrs::{Axis, Button, Event, EventType, Gilrs};
 use plane_core::{ControlState, FcInput, MAGIC, MSG_LEN};
-use serialport::SerialPortType;
 use std::time::{Duration, Instant};
+use tui::TrimAdjuster;
 
 mod tui;
 
@@ -128,7 +128,17 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let mut gilrs = Gilrs::new().unwrap();
-    let mut tui = tui::Tui::new(ratatui::init());
+    let trim = match TrimAdjuster::from_config() {
+        Ok(t) => {
+            println!("Loaded trim config: {t:?}");
+            t
+        }
+        Err(e) => {
+            println!("Failed to load trim config: {e:?}");
+            Default::default()
+        }
+    };
+    let mut tui = tui::Tui::new(ratatui::init(), trim);
 
     /*
     let port_info = 'outer: loop {
@@ -169,7 +179,7 @@ fn main() -> Result<()> {
         s * x.abs().powf(exponent)
     }
 
-    loop {
+    'outer: loop {
         tui.run();
 
         let now = Instant::now();
@@ -184,10 +194,11 @@ fn main() -> Result<()> {
                     GcsEvent::Yaw(v) => raw_state.yaw = exp(v, args.exponent),
                     GcsEvent::Roll(v) => raw_state.roll = exp(v, args.exponent),
                     GcsEvent::Throttle(v) => raw_state.throttle = exp(v.max(0.0), args.exponent),
-                    GcsEvent::Arm => armed = true,
+                    GcsEvent::Arm => {
+                        armed = true;
+                    }
                     GcsEvent::Disarm => {
-                        armed = false;
-                        ratatui::restore();
+                        break 'outer;
                     }
                     GcsEvent::NextTrim => {
                         new_trim = true;
@@ -210,20 +221,13 @@ fn main() -> Result<()> {
 
             if let EventType::Disconnected = &event {
                 tui.log("Controller disconnected. Exiting");
-                let Ok(bytes) = packet_for_input(&FcInput {
-                    trim: tui.trim(),
-                    controls: Default::default(),
-                    armed: false,
-                })
-                .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}"))) else {
-                    continue;
-                };
-                tui.log(format!("Sending: {filtered_state:?}"));
-                port.write_all(&bytes)
-                    .context("Failed to write to serial port")?;
+                break 'outer;
+            }
+        }
 
-                port.flush().context("Failed to flush serial port")?;
-                return Ok(());
+        if new_trim {
+            if let Err(e) = tui.save_trim() {
+                tui.log(format!("Failed to save trim: {e:?}"));
             }
         }
 
@@ -289,9 +293,23 @@ fn main() -> Result<()> {
             next_send = now + Duration::from_secs_f32(1.0 / args.send_rate_hz);
         }
 
-        if !armed {
-            return Ok(());
-        }
         std::thread::sleep(Duration::from_millis(1));
     }
+    ratatui::restore();
+
+    if let Some(bytes) = packet_for_input(&FcInput {
+        trim: tui.trim(),
+        controls: Default::default(),
+        armed: false,
+    })
+    .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}")))
+    .ok()
+    {
+        tui.log(format!("Sending final msg: {filtered_state:?}"));
+        port.write_all(&bytes)
+            .context("Failed to write to serial port")?;
+
+        port.flush().context("Failed to flush serial port")?;
+    }
+    return Ok(());
 }

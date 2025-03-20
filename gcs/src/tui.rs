@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use plane_core::TrimConfig;
 use ratatui::{
     DefaultTerminal,
@@ -20,6 +21,21 @@ enum TrimItem {
 pub struct TrimAdjuster {
     currently_editing: TrimItem,
     config: TrimConfig,
+}
+
+const TRIM_PATH: &str = "./trim_config.json";
+
+impl TrimAdjuster {
+    pub fn from_config() -> Result<Self> {
+        let json = std::fs::read_to_string(TRIM_PATH)
+            .with_context(|| format!("Failed to read trim file at {TRIM_PATH}"))?;
+        let config: TrimConfig =
+            serde_json::from_str(&json).context("Failed to deserialize trim json")?;
+        Ok(Self {
+            config,
+            currently_editing: Default::default(),
+        })
+    }
 }
 
 impl Widget for TrimAdjuster {
@@ -76,11 +92,11 @@ pub struct Tui {
 }
 
 impl Tui {
-    pub fn new(terminal: DefaultTerminal) -> Self {
+    pub fn new(terminal: DefaultTerminal, trim: TrimAdjuster) -> Self {
         Tui {
             terminal,
             log: Default::default(),
-            trim: Default::default(),
+            trim,
         }
     }
 
@@ -185,5 +201,14 @@ impl Tui {
 
     pub fn trim(&self) -> TrimConfig {
         self.trim.config.clone()
+    }
+
+    pub fn save_trim(&self) -> Result<()> {
+        let json =
+            serde_json::to_string(&self.trim.config).context("Failed to serialize trim json")?;
+        std::fs::write(TRIM_PATH, &json)
+            .with_context(|| format!("Failed to write trim to path {TRIM_PATH}"))?;
+
+        Ok(())
     }
 }
