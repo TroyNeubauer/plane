@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use gilrs::{Axis, Button, Event, EventType, Gilrs};
 use plane_core::{ControlState, FcInput, MAGIC, MSG_LEN};
@@ -19,11 +19,10 @@ pub enum GcsEvent {
     Throttle(f32),
     Arm,
     Disarm,
-
     NextTrim,
     PreviousTrim,
     MoreTrim,
-    LessTrim
+    LessTrim,
 }
 
 pub struct ControlMapping {
@@ -54,7 +53,6 @@ impl ControlMapping {
                 } else if button == self.less_trim {
                     return Some(GcsEvent::LessTrim);
                 }
-
             }
             gilrs::EventType::ButtonRepeated(button, _) => {
                 if button == self.disarm {
@@ -132,27 +130,26 @@ fn main() -> Result<()> {
     let mut gilrs = Gilrs::new().unwrap();
     let mut tui = tui::Tui::new(ratatui::init());
 
-    /*let _ = gilrs
-        .gamepads()
-        .next()
-        .ok_or_else(|| anyhow!("No gamepads detected"))?;*/
-
+    /*
     let port_info = 'outer: loop {
         for info in serialport::available_ports().context("Failed to list serial ports")? {
             if let SerialPortType::UsbPort(usb) = &info.port_type {
-                if usb.manufacturer == Some("Embassy".to_string()) {
-                    tui.log("Found flight controller serial - skipping");
-                    continue;
+                if usb.serial_number.as_deref() == Some("B000IV2L") {
+                    break 'outer info;
                 }
             }
-            break 'outer info;
+            println!("{info:?}");
         }
         bail!("Failed to find local GCS radio");
     };
 
-    tui.log("Opening: {port_info:?}");
+    tui.log(format!("Opening: {port_info:?}"));
+    */
 
-    let builder = serialport::new("/dev/tty.usbserial-B000IV2L"/*port_info.port_name*/, 57600);
+    let builder = serialport::new(
+        "/dev/tty.usbserial-B000IV2L", /*port_info.port_name*/
+        57600,
+    );
     let mut port = builder.open().context("Failed to open serial port")?;
 
     const MIN_VAL: f32 = 0.001;
@@ -188,11 +185,26 @@ fn main() -> Result<()> {
                     GcsEvent::Roll(v) => raw_state.roll = exp(v, args.exponent),
                     GcsEvent::Throttle(v) => raw_state.throttle = exp(v.max(0.0), args.exponent),
                     GcsEvent::Arm => armed = true,
-                    GcsEvent::Disarm => { armed = false; ratatui::restore(); },
-                    GcsEvent::NextTrim => { new_trim = true; tui.next_trim() },
-                    GcsEvent::PreviousTrim => { new_trim = true; tui.previous_trim() },
-                    GcsEvent::MoreTrim => { new_trim = true; tui.more_trim() },
-                    GcsEvent::LessTrim => { new_trim = true; tui.less_trim() },
+                    GcsEvent::Disarm => {
+                        armed = false;
+                        ratatui::restore();
+                    }
+                    GcsEvent::NextTrim => {
+                        new_trim = true;
+                        tui.next_trim()
+                    }
+                    GcsEvent::PreviousTrim => {
+                        new_trim = true;
+                        tui.previous_trim()
+                    }
+                    GcsEvent::MoreTrim => {
+                        new_trim = true;
+                        tui.more_trim()
+                    }
+                    GcsEvent::LessTrim => {
+                        new_trim = true;
+                        tui.less_trim()
+                    }
                 }
             }
 
@@ -203,10 +215,10 @@ fn main() -> Result<()> {
                     controls: Default::default(),
                     armed: false,
                 })
-                .map_err(|e| tui.log("Failed to serialize control packet: {e:?}")) else {
+                .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}"))) else {
                     continue;
                 };
-                tui.log("Sending: {filtered_state:?}: {bytes:02X?}");
+                tui.log(format!("Sending: {filtered_state:?}"));
                 port.write_all(&bytes)
                     .context("Failed to write to serial port")?;
 
@@ -258,7 +270,7 @@ fn main() -> Result<()> {
             {
                 continue;
             }
-            tui.log("Sending: {filtered_state:?}");
+            tui.log(format!("Sending: {filtered_state:?}"));
 
             last_state_sent = filtered_state.clone();
             let Ok(bytes) = packet_for_input(&FcInput {
@@ -266,10 +278,10 @@ fn main() -> Result<()> {
                 controls: filtered_state.clone(),
                 armed,
             })
-            .map_err(|e| tui.log("Failed to serialize control packet: {e:?}")) else {
+            .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}"))) else {
                 continue;
             };
-            tui.log("Sending: {filtered_state:?}: {bytes:02X?}");
+            tui.log(format!("Sending: {filtered_state:?}"));
             port.write_all(&bytes)
                 .context("Failed to write to serial port")?;
             port.flush().context("Failed to flush serial port")?;
@@ -278,7 +290,7 @@ fn main() -> Result<()> {
         }
 
         if !armed {
-            return Ok(())
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(1));
     }
