@@ -175,6 +175,12 @@ fn main() -> Result<()> {
     }
 
     loop {
+        if port.bytes_to_read().is_ok_and(|a| a > 0) {
+            let mut buf = [0u8; 32];
+            let _ = port.read(&mut buf);
+            println!("{}", String::from_utf8_lossy(&buf));
+        }
+
         let now = Instant::now();
         let mut new_trim = false;
 

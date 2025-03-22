@@ -98,6 +98,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
             let payload = &buf[1..];
             if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
                 info!("{cmd:?}");
+                uart.write(b"gotcmd").await;
                 state.pitch = cmd.controls.pitch;
                 state.yaw = cmd.controls.yaw;
                 state.roll = cmd.controls.roll;
