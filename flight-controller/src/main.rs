@@ -7,10 +7,11 @@
 
 use defmt_rtt as _;
 use embassy_executor::Spawner;
-use embassy_rp::gpio::Output;
-use embassy_rp::peripherals::UART1;
+use embassy_rp::gpio::{Level, Output};
+use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
 use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmError, PwmOutput, SetDutyCycle};
-use embassy_rp::uart::{self, UartRx};
+use embassy_rp::uart::{self, Uart, UartRx, UartTx};
+use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_time::Timer;
 use log::warn;
@@ -37,6 +38,14 @@ async fn main(spawner: Spawner) {
 //
 // }
 
+async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
+    prop.set_from_axis_control(1.0);
+    Timer::after_secs(3).await;
+    prop.set_from_axis_control(-1.0);
+    Timer::after_secs(3).await;
+    prop.set_from_axis_control(0.0);
+}
+
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
 async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
@@ -44,11 +53,6 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     // pi pico visible LED
     // let led = Output::new(p.PIN_25, Level::Low);
 
-    // Wait for us to connect to serial if viewing logs
-    Timer::after_secs(3).await;
-
-    let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
-    let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
     let (mut elevator, mut prop) = RawPwm::new_ab(
         p.PWM_SLICE3,
         p.PIN_6,
@@ -59,15 +63,32 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
         MAX_PERC_DFL,
     );
 
+    // init_esc(&mut prop).await;
+
+    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
+        p.PWM_SLICE4,
+        p.PIN_8,
+        p.PIN_9,
+        50,
+        64,
+        MIN_PERC_DFL,
+        MAX_PERC_DFL,
+    );
+
+    /*prop.set_from_axis_control(0.5);
+    Timer::after_secs(10).await;
+    prop.set_from_axis_control(0.0);*/
+
     let _ = left_aleron.set_from_axis_control(0.0);
     let _ = right_aleron.set_from_axis_control(0.0);
     let _ = elevator.set_from_axis_control(0.0);
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
-
-    // let uart_tx = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH0, config);
-    let mut uart_rx = UartRx::new(p.UART1, p.PIN_5, Irqs, p.DMA_CH1, config);
+    let uart = Uart::new(
+        p.UART1, p.PIN_4, p.PIN_5, Irqs, p.DMA_CH0, p.DMA_CH1, config,
+    );
+    let (mut uart_tx, mut uart_rx) = uart.split();
 
     // spawner
     //     .spawn(logger_task(uart_tx))
@@ -75,19 +96,25 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
 
     let mut state = ControlState::default();
 
+    loop {
+        uart_tx.write(b"Writing to UART!\n").await;
+        Timer::after_secs(1).await;
+    }
+
     let mut trim_config: TrimConfig = TrimConfig::default();
     log::info!("Reading...");
     loop {
         let mut buf = [0; 40];
         if let Err(e) = uart_rx.read(&mut buf).await {
-            warn!("Failed to read data: {e:?}");
+            uart_tx.write(b"failed to read data!").await;
         }
         if buf[0] != MAGIC {
-            warn!("Off of magic!");
+            uart_tx.write(b"off magic!").await;
         } else {
             let payload = &buf[1..];
             if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
                 info!("{cmd:?}");
+                uart_tx.write(b"gotcmd").await;
                 state.pitch = cmd.controls.pitch;
                 state.yaw = cmd.controls.yaw;
                 state.roll = cmd.controls.roll;

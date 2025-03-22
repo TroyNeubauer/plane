@@ -6,8 +6,10 @@ use ratatui::{
     text::Text,
     widgets::{Block, List, Widget},
 };
+use std::fmt::Display;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Copy, Clone, strum_macros::FromRepr)]
+#[repr(u8)]
 enum TrimItem {
     #[default]
     Elevator,
@@ -15,6 +17,21 @@ enum TrimItem {
     RightAileron,
     RollRange,
     ElevatorRange,
+}
+impl TrimItem {
+    fn next_trim(self) -> TrimItem {
+        let v = self as u8;
+        TrimItem::from_repr(v + 1).unwrap_or_else(|| Self::from_repr(0).unwrap())
+    }
+
+    fn previous_trim(self) -> TrimItem {
+        let v = self as u8;
+        match v.checked_sub(1) {
+            Some(v) => TrimItem::from_repr(v).unwrap(),
+            // NOTE: Must be the last variant in `TrimItem`
+            None => TrimItem::ElevatorRange,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -118,94 +135,82 @@ impl Tui {
     pub fn log(&mut self, s: impl Into<String>) {
         self.log.inner.push(s.into());
     }
+}
 
+impl Display for TrimAdjuster {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        format!(
+            "Editing {:?} (Use dpad left/right to edit other value, dpad up/down to inc/dec)",
+            self.currently_editing
+        )
+        .fmt(f);
+
+        let v = match self.currently_editing {
+            TrimItem::Elevator => self.config.elevator,
+            TrimItem::LeftAileron => self.config.left_aileron,
+            TrimItem::RightAileron => self.config.right_aileron,
+            TrimItem::RollRange => self.config.roll_range,
+            TrimItem::ElevatorRange => self.config.elevator_range,
+        };
+        v.fmt(f)
+    }
+}
+
+impl TrimAdjuster {
     pub fn more_trim(&mut self) {
-        match self.trim.currently_editing {
+        match self.currently_editing {
             TrimItem::Elevator => {
-                self.trim.config.elevator += 0.1;
+                self.config.elevator += 0.1;
             }
             TrimItem::LeftAileron => {
-                self.trim.config.left_aileron += 0.1;
+                self.config.left_aileron += 0.1;
             }
             TrimItem::RightAileron => {
-                self.trim.config.right_aileron += 0.1;
+                self.config.right_aileron += 0.1;
             }
             TrimItem::RollRange => {
-                self.trim.config.roll_range += 0.1;
+                self.config.roll_range += 0.1;
             }
             TrimItem::ElevatorRange => {
-                self.trim.config.elevator_range += 0.1;
+                self.config.elevator_range += 0.1;
             }
         }
     }
 
     pub fn less_trim(&mut self) {
-        match self.trim.currently_editing {
+        match self.currently_editing {
             TrimItem::Elevator => {
-                self.trim.config.elevator -= 0.05;
+                self.config.elevator -= 0.05;
             }
             TrimItem::LeftAileron => {
-                self.trim.config.left_aileron -= 0.05;
+                self.config.left_aileron -= 0.05;
             }
             TrimItem::RightAileron => {
-                self.trim.config.right_aileron -= 0.05;
+                self.config.right_aileron -= 0.05;
             }
             TrimItem::RollRange => {
-                self.trim.config.roll_range -= 0.05;
+                self.config.roll_range -= 0.05;
             }
             TrimItem::ElevatorRange => {
-                self.trim.config.elevator_range -= 0.05;
+                self.config.elevator_range -= 0.05;
             }
         }
     }
 
     pub fn next_trim(&mut self) {
-        match self.trim.currently_editing {
-            TrimItem::Elevator => {
-                self.trim.currently_editing = TrimItem::LeftAileron;
-            }
-            TrimItem::LeftAileron => {
-                self.trim.currently_editing = TrimItem::RightAileron;
-            }
-            TrimItem::RightAileron => {
-                self.trim.currently_editing = TrimItem::RollRange;
-            }
-            TrimItem::RollRange => {
-                self.trim.currently_editing = TrimItem::ElevatorRange;
-            }
-            TrimItem::ElevatorRange => {
-                self.trim.currently_editing = TrimItem::Elevator;
-            }
-        }
+        self.currently_editing = self.currently_editing.next_trim();
     }
 
     pub fn previous_trim(&mut self) {
-        match self.trim.currently_editing {
-            TrimItem::LeftAileron => {
-                self.trim.currently_editing = TrimItem::Elevator;
-            }
-            TrimItem::RightAileron => {
-                self.trim.currently_editing = TrimItem::LeftAileron;
-            }
-            TrimItem::RollRange => {
-                self.trim.currently_editing = TrimItem::RightAileron;
-            }
-            TrimItem::ElevatorRange => {
-                self.trim.currently_editing = TrimItem::RollRange;
-            }
-            TrimItem::Elevator => {
-                self.trim.currently_editing = TrimItem::ElevatorRange;
-            }
-        }
+        self.currently_editing = self.currently_editing.previous_trim();
     }
 
     pub fn trim(&self) -> TrimConfig {
-        self.trim.config.clone()
+        self.config.clone()
     }
 
     pub fn save_trim(&self) -> Result<()> {
-        let json =
-            serde_json::to_string(&self.trim.config).context("Failed to serialize trim json")?;
+        let json = serde_json::to_string(&self.config).context("Failed to serialize trim json")?;
         std::fs::write(TRIM_PATH, &json)
             .with_context(|| format!("Failed to write trim to path {TRIM_PATH}"))?;
 

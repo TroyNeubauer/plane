@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use gilrs::{Axis, Button, Event, EventType, Gilrs};
 use plane_core::{ControlState, FcInput, MAGIC, MSG_LEN};
+use serialport::SerialPortType;
 use std::time::{Duration, Instant};
 use tui::TrimAdjuster;
 
@@ -140,7 +141,13 @@ fn main() -> Result<()> {
     };
     let mut tui = tui::Tui::new(ratatui::init(), trim);
 
-    /*
+    let mut tr = TrimAdjuster::default();
+
+    let _ = gilrs
+        .gamepads()
+        .next()
+        .ok_or_else(|| anyhow!("No gamepads detected"))?;
+
     let port_info = 'outer: loop {
         for info in serialport::available_ports().context("Failed to list serial ports")? {
             if let SerialPortType::UsbPort(usb) = &info.port_type {
@@ -154,12 +161,9 @@ fn main() -> Result<()> {
     };
 
     tui.log(format!("Opening: {port_info:?}"));
-    */
 
-    let builder = serialport::new(
-        "/dev/tty.usbserial-B000IV2L", /*port_info.port_name*/
-        57600,
-    );
+    let builder = serialport::new(port_info.port_name, 57600);
+
     let mut port = builder.open().context("Failed to open serial port")?;
 
     const MIN_VAL: f32 = 0.001;
@@ -237,14 +241,14 @@ fn main() -> Result<()> {
                 || raw_state.roll > args.deadband
                 || raw_state.throttle > args.deadband
             {
-                tui.log("Controller is disarmed. Press right trigger to arm vehicle");
+                println!("Controller is disarmed. Press right trigger to arm vehicle");
             }
 
             raw_state = ControlState {
                 pitch: 0.0,
                 yaw: 0.0,
                 roll: 0.0,
-                throttle: 0.0,
+                throttle: -1.0,
             };
         }
 
@@ -278,14 +282,14 @@ fn main() -> Result<()> {
 
             last_state_sent = filtered_state.clone();
             let Ok(bytes) = packet_for_input(&FcInput {
-                trim: tui.trim(),
+                trim: tr.config.clone(),
                 controls: filtered_state.clone(),
                 armed,
             })
             .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}"))) else {
                 continue;
             };
-            tui.log(format!("Sending: {filtered_state:?}"));
+
             port.write_all(&bytes)
                 .context("Failed to write to serial port")?;
             port.flush().context("Failed to flush serial port")?;
