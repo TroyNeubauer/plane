@@ -38,13 +38,25 @@ async fn main(spawner: Spawner) {
 //
 // }
 
+
+async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
+    prop.set_from_axis_control(1.0);
+    Timer::after_secs(3).await;
+    prop.set_from_axis_control(-1.0);
+    Timer::after_secs(3).await;
+    prop.set_from_axis_control(0.0);
+}
+
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
 async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
     let mut led = Output::new(p.PIN_25, Level::Low);
 
-    Timer::after_secs(3).await;
+    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+
+    init_esc(&mut prop).await;
+
     // Start tasks
 
     // spawner
@@ -53,7 +65,12 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
     let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
-    let (mut elevator, mut prop) = RawPwm::new_ab(p.PWM_SLICE3, p.PIN_6, p.PIN_7, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+
+    /*prop.set_from_axis_control(0.5);
+    Timer::after_secs(10).await;
+    prop.set_from_axis_control(0.0);*/
+
+
 
     left_aleron.set_from_axis_control(0.0);
     right_aleron.set_from_axis_control(0.0);
