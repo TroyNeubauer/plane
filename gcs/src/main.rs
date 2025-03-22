@@ -154,7 +154,7 @@ fn main() -> Result<()> {
 
     println!("Opening: {port_info:?}");
 
-    let builder = serialport::new("/dev/tty.usbserial-B000IV2L"/*port_info.port_name*/, 57600);
+    let builder = serialport::new("/dev/cu.usbserial-B000IV2L"/*port_info.port_name*/, 57600);
     let mut port = builder.open().context("Failed to open serial port")?;
 
     const MIN_VAL: f32 = 0.001;
@@ -258,7 +258,6 @@ fn main() -> Result<()> {
             {
                 continue;
             }
-            println!("Sending: {filtered_state:?}");
 
             last_state_sent = filtered_state.clone();
             let Ok(bytes) = packet_for_input(&FcInput {
@@ -269,7 +268,7 @@ fn main() -> Result<()> {
             .map_err(|e| println!("Failed to serialize control packet: {e:?}")) else {
                 continue;
             };
-            println!("Sending: {filtered_state:?}: {bytes:02X?}");
+            print!(">");
             port.write_all(&bytes)
                 .context("Failed to write to serial port")?;
             port.flush().context("Failed to flush serial port")?;
@@ -277,9 +276,6 @@ fn main() -> Result<()> {
             next_send = now + Duration::from_secs_f32(1.0 / args.send_rate_hz);
         }
 
-        if !armed {
-            return Ok(())
-        }
         std::thread::sleep(Duration::from_millis(1));
     }
 }
