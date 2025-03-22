@@ -10,7 +10,7 @@ use embassy_executor::Spawner;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
 use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmOutput, SetDutyCycle};
-use embassy_rp::uart::{self, UartRx, UartTx};
+use embassy_rp::uart::{self, Uart, UartRx, UartTx};
 use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_time::Timer;
@@ -63,8 +63,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     //     .spawn(pwm_set_dutycycle(p.PWM_SLICE2, p.PIN_4, led))
     //     .map_err(|_| "failed to spawn logger task")?;
 
-    let mut left_aleron = RawPwm::new(p.PWM_SLICE2, p.PIN_4, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
-    let mut right_aleron = RawPwm::new(p.PWM_SLICE1, p.PIN_2, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
+    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(p.PWM_SLICE4, p.PIN_8, p.PIN_9, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
 
     /*prop.set_from_axis_control(0.5);
     Timer::after_secs(10).await;
@@ -78,9 +77,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
-
-    // let uart_tx = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH0, config);
-    let mut uart_rx = UartRx::new(p.UART1, p.PIN_5, Irqs, p.DMA_CH1, config);
+    let mut uart = Uart::new(p.UART1, p.PIN_4, p.PIN_5, Irqs, p.DMA_CH0, p.DMA_CH1, config);
 
     // spawner
     //     .spawn(logger_task(uart_tx))
@@ -92,11 +89,11 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     log::info!("Reading...");
     loop {
         let mut buf = [0; 40];
-        if let Err(e) = uart_rx.read(&mut buf).await {
-            warn!("Failed to read data: {e:?}");
+        if let Err(e) = uart.read(&mut buf).await {
+            uart.write(b"failed to read data!").await;
         }
         if buf[0] != MAGIC {
-            warn!("Off of magic!");
+            uart.write(b"off magic!").await;
         } else {
             let payload = &buf[1..];
             if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
