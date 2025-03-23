@@ -126,7 +126,7 @@ pub fn log_defmt(
 
     log::logger().log(
         &LogRecord::builder()
-            .args(format_args!("{}", frame.display_message()))
+            .args(format_args!("FC: {}", frame.display_message()))
             .level(level) // no need to set the level, since it is transferred via payload
             .module_path(module_path)
             .file(file)

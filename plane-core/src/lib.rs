@@ -4,19 +4,21 @@
 pub mod byte_rate_counter;
 
 use serde::{Deserialize, Serialize};
+use defmt::Format;
 
 pub const MAX_FC_INPUT_PAYLOAD: usize = 32;
 pub const MAX_FC_OUTPUT_PACKET: usize = 64;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Format)]
 pub enum FcInput {
     Trim(TrimConfig),
     Controls(ControlState),
     Arm,
     Disarm,
+    ResetToUsbBoot,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Format)]
 pub enum FcOutput {
     // Save two bytes for the discriminant
     StringLog(heapless::String<62>),
@@ -30,7 +32,7 @@ pub enum FcOutput {
     },
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Format)]
 pub struct ControlState {
     pub pitch: f32,
     pub yaw: f32,
@@ -59,7 +61,7 @@ impl ControlState {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Debug, Default, Serialize, Deserialize, Format)]
 pub struct TrimConfig {
     pub elevator: f32,
     pub left_aileron: f32,

@@ -1,11 +1,16 @@
 use anyhow::{Context, Result, anyhow};
 use async_channel::bounded as bounded_async;
 use clap::Parser;
+use futures_util::StreamExt;
 use gilrs::{Event, EventType, Gilrs};
 use log::{debug, error, info, warn};
 use plane_core::{ControlState, FcInput};
 use serial_driver::SerialDriver;
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tui::TrimAdjuster;
 
 mod defmt_decoder;
@@ -35,13 +40,33 @@ pub struct Args {
     alpha: f32,
     #[clap(value_parser, default_value = "1.6")]
     exponent: f32,
+    #[clap(short = 'a', value_parser, default_value = "true")]
+    always_send_controls: bool,
+    #[clap(value_parser, default_value = "./logs")]
+    log_dir: Option<String>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    let (text_log_path, serial_tx_log_path, serial_rx_log_path) = if let Some(dir) = args.log_dir {
+        let _ = std::fs::create_dir_all(&dir);
+
+        let mut text = PathBuf::from(&dir);
+        text.push(timestamped_file_name("log", "txt"));
+
+        let mut serial_tx = PathBuf::from(&dir);
+        serial_tx.push(timestamped_file_name("serial_tx", "bin"));
+
+        let mut serial_rx = PathBuf::from(&dir);
+        serial_rx.push(timestamped_file_name("serial_rx", "bin"));
+        (Some(text), Some(serial_tx), Some(serial_rx))
+    } else {
+        (None, None, None)
+    };
+
     let (log_tx, log_rx) = crossbeam_channel::bounded(16);
-    tui_logger::init(log_tx);
+    tui_logger::init(log_tx, text_log_path.as_deref());
 
     let mut gilrs = Gilrs::new().unwrap();
     let trim = match TrimAdjuster::from_config() {
@@ -79,9 +104,14 @@ fn main() -> Result<()> {
         baud_rate: args.pilot_radio_baud_rate,
         fc_command_rx,
         fc_telemetry_tx,
+        tx_log_path: serial_tx_log_path,
+        rx_log_path: serial_rx_log_path,
     };
 
     serial_driver.start_tasks(&runtime);
+
+    let usb_watcher = nusb::watch_devices().context("Failed to start usb watcher")?;
+    runtime.spawn(usb_scan_task(usb_watcher));
 
     let mut defmt_decoder = match args.firmware_bin_path.as_ref() {
         Some(path) => Some(
@@ -96,6 +126,7 @@ fn main() -> Result<()> {
 
     const MIN_VAL: f32 = 0.001;
 
+    let mut sent_fc_usb_reset_cmd = false;
     let input_mapping = ControlMapping::default();
     let mut next_send = Instant::now();
     let mut next_filter = Instant::now();
@@ -140,9 +171,17 @@ fn main() -> Result<()> {
         let now = Instant::now();
         let mut new_trim = false;
 
+        if sent_fc_usb_reset_cmd && RPI_CONNECTED_ON_USB.load(Ordering::Relaxed) {
+            info!("Detected rpi on usb in boot mode. Ready to reflash - exiting");
+
+            std::thread::sleep(Duration::from_millis(200));
+            break 'outer;
+        }
+
         // Update state based on events
-        while let Some(Event { event, .. }) = gilrs.next_event() {
-            if let Some(msg) = input_mapping.map_to_message(event) {
+        while let Some(Event { id, event, .. }) = gilrs.next_event() {
+            let gamepad = gilrs.gamepad(id);
+            if let Some(msg) = input_mapping.map_to_message(event, gamepad) {
                 match msg {
                     // Invert pitch so that pulling stick towards you makes plane pitch up
                     GcsEvent::Pitch(v) => raw_state.pitch = -exp(v, args.exponent),
@@ -181,6 +220,18 @@ fn main() -> Result<()> {
                         info!("Received exit event. Exiting");
                         break 'outer;
                     }
+                    GcsEvent::ResetFcToUsbBoot => {
+                        if armed {
+                            error!("Refusing to reset flight controller while armed");
+                        } else {
+                            sent_fc_usb_reset_cmd = true;
+                            info!("Sent reset command to flight controller");
+                            let command = FcInput::ResetToUsbBoot;
+                            if fc_command_tx.try_send(command).is_err() {
+                                warn!("Failed to send controls command to serial task");
+                            }
+                        }
+                    }
                 }
             }
 
@@ -191,6 +242,11 @@ fn main() -> Result<()> {
         }
 
         if new_trim {
+            let command = FcInput::Trim(tui.trim.values());
+            if fc_command_tx.try_send(command).is_err() {
+                debug!("Failed to send controls command to serial task");
+            }
+
             if let Err(e) = tui.trim.save() {
                 error!("Failed to save trim: {e:?}");
             }
@@ -235,7 +291,7 @@ fn main() -> Result<()> {
                 && last_state_sent.yaw.abs() < MIN_VAL
                 && last_state_sent.roll.abs() < MIN_VAL
                 && last_state_sent.throttle.abs() < MIN_VAL
-                && !new_trim
+                && !args.always_send_controls
             {
                 continue;
             }
@@ -270,4 +326,41 @@ fn main() -> Result<()> {
     runtime.shutdown_background();
 
     return Ok(());
+}
+
+static RPI_CONNECTED_ON_USB: AtomicBool = AtomicBool::new(false);
+
+async fn usb_scan_task(mut usb_watcher: nusb::hotplug::HotplugWatch) {
+    const VENDOR_ID: u16 = 0x2E8A;
+    const PRODUCT_ID: u16 = 0x0003;
+
+    if let Ok(mut devs) = nusb::list_devices() {
+        if devs.any(|d| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID) {
+            RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
+            info!("RPI detected");
+        }
+    }
+
+    while let Some(event) = usb_watcher.next().await {
+        info!("USB event: {event:?}");
+        match event {
+            nusb::hotplug::HotplugEvent::Connected(info) => {
+                if info.vendor_id() == VENDOR_ID && info.product_id() == PRODUCT_ID {
+                    RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
+                    info!("RPI detected");
+                }
+            }
+            _ => {}
+        };
+    }
+}
+
+pub fn timestamped_file_name(prefix: &str, extension: &str) -> String {
+    let now = SystemTime::now();
+    let now = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!(
+        "{prefix}_{}.{:03}.{extension}",
+        now.as_secs(),
+        now.subsec_millis()
+    )
 }

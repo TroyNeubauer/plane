@@ -1,6 +1,6 @@
 use core::{
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use bitflare::BitflareWriter;
@@ -81,7 +81,7 @@ impl BitflareEncoder {
     fn set_spawner(&self, spawner: Spawner) {
         critical_section::with(|_| {
             if self.taken.load(Ordering::Relaxed) {
-                panic!("set_spawner reentrantly")
+                defmt::panic!("set_spawner reentrantly")
             }
             // no need for CAS because we are in a critical section
             self.taken.store(true, Ordering::Relaxed);
@@ -100,7 +100,7 @@ impl BitflareEncoder {
         let restore = unsafe { critical_section::acquire() };
 
         if self.taken.load(Ordering::Relaxed) {
-            panic!("defmt logger taken reentrantly")
+            defmt::panic!("defmt logger taken reentrantly")
         }
         self.taken.store(true, Ordering::Relaxed);
 
@@ -117,7 +117,7 @@ impl BitflareEncoder {
     /// Release the defmt encoder.
     unsafe fn release(&self) {
         if !self.taken.load(Ordering::Relaxed) {
-            panic!("defmt release out of context")
+            defmt::panic!("defmt release out of context")
         }
 
         // Safety: We are in the critical section and not being called reentrantly
@@ -139,7 +139,7 @@ impl BitflareEncoder {
     /// Write bytes to the defmt encoder.
     unsafe fn write(&self, bytes: &[u8]) {
         if !self.taken.load(Ordering::Relaxed) {
-            panic!("defmt write out of context")
+            defmt::panic!("defmt write out of context")
         }
 
         // Safety: taken is set therefore we are in a critical section

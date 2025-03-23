@@ -17,6 +17,7 @@ pub enum GcsEvent {
     MoreTrim,
     LessTrim,
     Exit,
+    ResetFcToUsbBoot,
 }
 
 pub struct ControlMapping {
@@ -31,10 +32,12 @@ pub struct ControlMapping {
     more_trim: Button,
     less_trim: Button,
     exit_ev_code: u32,
+    reset_fc_to_usb_a: Button,
+    reset_fc_to_usb_b: Button,
 }
 
 impl ControlMapping {
-    pub fn map_to_message(&self, event: EventType) -> Option<GcsEvent> {
+    pub fn map_to_message(&self, event: EventType, gamepad: gilrs::Gamepad) -> Option<GcsEvent> {
         match event {
             gilrs::EventType::ButtonPressed(button, code) => {
                 if button == self.disarm {
@@ -53,10 +56,26 @@ impl ControlMapping {
                 if code == self.exit_ev_code {
                     return Some(GcsEvent::Exit);
                 }
+
+                if button == self.reset_fc_to_usb_a
+                    || button == self.reset_fc_to_usb_b
+                        && (gamepad.is_pressed(self.reset_fc_to_usb_a)
+                            && gamepad.is_pressed(self.reset_fc_to_usb_b))
+                {
+                    return Some(GcsEvent::ResetFcToUsbBoot);
+                }
             }
             gilrs::EventType::ButtonRepeated(button, _) => {
                 if button == self.disarm {
                     return Some(GcsEvent::Disarm);
+                } else if button == self.next_trim {
+                    return Some(GcsEvent::NextTrim);
+                } else if button == self.prev_trim {
+                    return Some(GcsEvent::PreviousTrim);
+                } else if button == self.more_trim {
+                    return Some(GcsEvent::MoreTrim);
+                } else if button == self.less_trim {
+                    return Some(GcsEvent::LessTrim);
                 }
             }
             gilrs::EventType::ButtonReleased(button, _) => {
@@ -97,6 +116,8 @@ impl Default for ControlMapping {
             more_trim: Button::DPadUp,
             less_trim: Button::DPadDown,
             exit_ev_code: 65852,
+            reset_fc_to_usb_a: Button::LeftTrigger2,
+            reset_fc_to_usb_b: Button::RightTrigger2,
         }
     }
 }

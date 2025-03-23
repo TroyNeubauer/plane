@@ -1,12 +1,16 @@
 use crossbeam_channel::TrySendError;
-use log::{Level, LevelFilter, Metadata, Record};
+use log::{Level, LevelFilter, Metadata, Record, info, warn};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use std::sync::OnceLock;
+use std::fs::File;
+use std::ops::DerefMut;
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 struct TuiLogger {
     tx: crossbeam_channel::Sender<Line<'static>>,
+    file: Option<Mutex<(File, Vec<u8>)>>,
 }
 
 fn get_timestamp() -> String {
@@ -52,8 +56,22 @@ impl log::Log for TuiLogger {
             spans.push(Span::raw(" "));
             // Append the actual log message.
             spans.push(Span::raw(format!("{}", record.args())));
-
             let line = Line::from(spans);
+
+            if let Some(mutex) = self.file.as_ref() {
+                let src_file = record.file().unwrap_or("<unknown>");
+                let src_line = record.line().unwrap_or(0);
+
+                let mut f = mutex.lock().unwrap();
+                let (file, buf) = f.deref_mut();
+
+                buf.clear();
+                use std::io::Write;
+                let _ = writeln!(buf, "{src_file: >24}:{src_line}:  {}", &line);
+
+                let _ = file.write(&buf);
+            }
+
             if let Err(TrySendError::Disconnected(line)) = self.tx.try_send(line) {
                 let s = line.to_string();
                 println!("{s}");
@@ -64,8 +82,36 @@ impl log::Log for TuiLogger {
     fn flush(&self) {}
 }
 
-pub fn init(tx: crossbeam_channel::Sender<Line<'static>>) {
-    let logger = Box::leak(Box::new(TuiLogger { tx }));
+pub fn init(tx: crossbeam_channel::Sender<Line<'static>>, out_file: Option<&Path>) {
+    let file = out_file.and_then(|p| match File::create(p) {
+        Ok(f) => {
+            info!("Created log file {p:?} successfully");
+            Some(Mutex::new((f, Vec::with_capacity(256))))
+        }
+        Err(e) => {
+            warn!("Failed to create output file {p:?}: {e:?}");
+            None
+        }
+    });
+
+    let logger = Box::leak(Box::new(TuiLogger { tx, file }));
     log::set_logger(logger).expect("Global logger already initialized!");
     log::set_max_level(LevelFilter::Info);
 }
+
+// Nop defmt writer since we use addative flags on bitflare, so both defmt and log backends end up
+// getting enabled
+#[defmt::global_logger]
+struct DefmtLogger;
+
+unsafe impl defmt::Logger for DefmtLogger {
+    fn acquire() {}
+
+    unsafe fn flush() {}
+
+    unsafe fn release() {}
+
+    unsafe fn write(_: &[u8]) {}
+}
+
+defmt::timestamp!("{=u32:us}", 0);
