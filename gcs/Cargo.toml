@@ -8,5 +8,20 @@ anyhow = "1.0.97"
 clap = { version = "4.5.32", features = ["derive"] }
 gilrs = "0.11.0"
 plane-core = { path = "../plane-core" }
-postcard = "1.1.1"
-serialport = "4.7.0"
+ratatui = "0.29.0"
+serde_json = "1.0.140"
+strum = "0.27.1"
+strum_macros = "0.27.1"
+tokio = { version = "1.44.1", default-features = false, features = ["io-util", "rt", "rt-multi-thread", "time", "macros"] }
+tokio-serial = "5.4.5"
+
+postcard = { workspace = true }
+serde = { workspace = true }
+bitflare = { workspace = true }
+crossbeam-channel = "0.5.14"
+log = "0.4.26"
+async-channel = "2.3.1"
+tokio-util = { version = "0.7.14", features = ["codec"] }
+futures-util = "0.3.31"
+defmt-decoder = "0.4.0"
+defmt-parser = "0.4.1"

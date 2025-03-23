@@ -5,7 +5,6 @@ set -e
 BUILD_TYPE=release
 MOUNT_POINT="/home/troy/mnt"
 TARGET="thumbv6m-none-eabi"
-BINARY_NAME=${1:-flight-controller}
 
 # Build the project
 echo "Building project..."
@@ -31,7 +30,7 @@ sudo mount -o uid=$(id -u),gid=$(id -g) $DEVICE_PARTITION $MOUNT_POINT
 
 # Run the upload command
 echo "Uploading firmware to Pico..."
-elf2uf2-rs -d target/${TARGET}/${BUILD_TYPE}/$BINARY_NAME $MOUNT_POINT
+elf2uf2-rs -d target/${TARGET}/${BUILD_TYPE}/flight-controller $MOUNT_POINT
 
 # Unmount after upload
 sync
@@ -39,6 +38,8 @@ sudo umount $MOUNT_POINT
 
 echo "Upload complete!"
 
-sleep 2
-sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00
+cargo r --bin gcs -- ./target/thumbv6m-none-eabi/release/flight-controller
+
+# sleep 2
+# sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00
 

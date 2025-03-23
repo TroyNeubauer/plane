@@ -22,7 +22,6 @@
             stable.rust-analyzer
             stable.rust-std
             stable.rust-src
-            # llvm-tools-preview
             targets.thumbv6m-none-eabi.stable.rust-std
           ];
 
@@ -34,12 +33,14 @@
             cargo-binutils
             gcc-arm-embedded
             openocd
+            minicom 
             minicom
-            udev
             pkg-config
-          ];
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ udev ];
 
-          LD_LIBRARY_PATH="${pkgs.udev}/lib";
+          shellHook = ''
+            ${if pkgs.stdenv.isLinux then "export LD_LIBRARY_PATH=${pkgs.udev}/lib" else ""}
+          '';
         };
       in
       {
