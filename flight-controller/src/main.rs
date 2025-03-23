@@ -35,7 +35,9 @@ fn _embassy_trace_task_new(_executor_id: u32, _task_id: u32) {}
 fn _embassy_trace_task_exec_begin(_executor_id: u32, _task_id: u32) {}
 fn _embassy_trace_task_exec_end(_excutor_id: u32, _task_id: u32) {}
 fn _embassy_trace_task_ready_begin(_executor_id: u32, _task_id: u32) {}
-fn _embassy_trace_executor_idle(_executor_id: u32) {}
+fn _embassy_trace_executor_idle(_executor_id: u32) {
+    info!("executor");
+}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -167,29 +169,14 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     loop {
         led.toggle();
 
-        let mut writer = BitflareWriter::new(&mut buf);
-        writer
-            .write_payload(|dst| {
-                let msg = FcOutput::StringLog("Hello world!".into());
-                let payload = postcard::to_slice(&msg, dst).map_err(|_| ())?;
-                Ok(payload.len())
-            })
-            .unwrap();
-
-        let bytes = writer.finish();
-        with_radio_serial(async |uart_tx| {
-            uart_tx.write(bytes).await.unwrap();
-        })
-        .await
-        .unwrap();
-
         Timer::after_secs(1).await;
 
-        defmt::trace!("trace");
-        defmt::debug!("debug");
-        defmt::info!("info");
-        defmt::warn!("warn");
-        defmt::error!("error");
+        defmt::trace!("DINGUS 1");
+        defmt::debug!("DINGUS 2");
+        defmt::info!("DINGUS 3");
+        defmt::warn!("DINGUS 4");
+        defmt::error!("DINGUS 5");
+        defmt::panic!("DINGUS!")
     }
 
     let mut armed = false;
@@ -389,33 +376,34 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         let bytes = writer.finish();
 
         let _ = uart.blocking_write(bytes);
-        let _ = uart.blocking_write(bytes);
-        let _ = uart.blocking_write(bytes);
 
-        let led_pin = unsafe { PIN_25::steal() };
-        let mut led = Output::new(led_pin, Level::Low);
+        morse_code_sos()
+    })
+}
 
-        loop {
-            // Rapid help blick
-            for action in small_morse::encode("SOS ") {
-                if action.state == small_morse::State::On {
-                    led.set_high();
-                } else {
-                    led.set_low();
-                }
+fn morse_code_sos() -> ! {
+    let led_pin = unsafe { PIN_25::steal() };
+    let mut led = Output::new(led_pin, Level::Low);
 
-                let timeout = action.duration as u32 * Duration::from_millis(100);
-                embassy_time::block_for(timeout);
+    loop {
+        // Rapid help blick
+        for action in small_morse::encode("SOS ") {
+            if action.state == small_morse::State::On {
+                led.set_high();
+            } else {
+                led.set_low();
             }
 
-            led.set_low();
-            embassy_time::block_for(Duration::from_secs(1));
+            let timeout = action.duration as u32 * Duration::from_millis(100);
+            embassy_time::block_for(timeout);
         }
-    })
+
+        led.set_low();
+        embassy_time::block_for(Duration::from_secs(1));
+    }
 }
 
 #[defmt::panic_handler]
 fn defmt_panic() -> ! {
-    // reset, defmt already called our regular panic
-    cortex_m::asm::udf();
+    morse_code_sos()
 }

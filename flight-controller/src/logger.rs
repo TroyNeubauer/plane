@@ -19,7 +19,6 @@ struct BitflareEncoder {
     /// Is `true` when `acquire` has been called and we have exclusive access to inner
     taken: AtomicBool,
     inner: UnsafeCell<Inner>,
-    num_tasks: AtomicUsize,
 }
 
 struct Inner {
@@ -27,14 +26,11 @@ struct Inner {
     cs_restore: critical_section::RestoreState,
     encoder: defmt::Encoder,
     spawner: Option<Spawner>,
+    buf: Vec<u8, 62>,
 }
 
 /// Creates a new async task that sends the given bytes
-fn write_bytes(b: &[u8]) {
-    let Ok(log_payload) = b.try_into() else {
-        panic!("Log message too big: {}", b.len());
-    };
-
+fn write_bytes(log_payload: Vec<u8, 62>) {
     let mut packet = [0u8; MAX_FC_OUTPUT_PACKET];
     let mut writer = BitflareWriter::new(&mut packet);
     writer
@@ -53,7 +49,9 @@ fn write_bytes(b: &[u8]) {
         }
     });
 
-    // TODO: do IO in background
+    // TODO: multi buffer allocation scheme
+    // use statically allocated buffers, dont move around
+    // do IO in background
     /*
     ENCODER.num_tasks.fetch_add(1, Ordering::AcqRel);
     if let Some(spawner) = self.spawner.as_ref() {
@@ -75,8 +73,8 @@ impl BitflareEncoder {
                 cs_restore: critical_section::RestoreState::invalid(),
                 encoder: defmt::Encoder::new(),
                 spawner: None,
+                buf: Vec::new(),
             }),
-            num_tasks: AtomicUsize::new(0),
         }
     }
 
@@ -109,8 +107,10 @@ impl BitflareEncoder {
         // Safety: We are in a critical section and there is no reentrantly
         let inner = unsafe { &mut *self.inner.get() };
         inner.cs_restore = restore;
+
+        inner.buf.clear();
         inner.encoder.start_frame(|b| {
-            write_bytes(b);
+            let _ = inner.buf.extend_from_slice(b);
         });
     }
 
@@ -123,10 +123,11 @@ impl BitflareEncoder {
         // Safety: We are in the critical section and not being called reentrantly
         let inner = unsafe { &mut *self.inner.get() };
         inner.encoder.end_frame(|b| {
-            write_bytes(b);
+            let _ = inner.buf.extend_from_slice(b);
         });
 
-        // Maybe always flush here?
+        let log_payload = core::mem::take(&mut inner.buf);
+        write_bytes(log_payload);
 
         let restore = inner.cs_restore;
         self.taken.store(false, Ordering::Relaxed);
@@ -145,7 +146,7 @@ impl BitflareEncoder {
         let inner = unsafe { &mut *self.inner.get() };
 
         inner.encoder.write(bytes, |b| {
-            write_bytes(b);
+            let _ = inner.buf.extend_from_slice(b);
         });
     }
 }

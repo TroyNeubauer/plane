@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use async_channel::bounded as bounded_async;
 use clap::Parser;
 use gilrs::{Event, EventType, Gilrs};
@@ -8,6 +8,7 @@ use serial_driver::SerialDriver;
 use std::time::{Duration, Instant};
 use tui::TrimAdjuster;
 
+mod defmt_decoder;
 mod serial_driver;
 mod tui;
 mod tui_logger;
@@ -18,6 +19,8 @@ use types::*;
 #[derive(Debug, Parser)]
 #[clap(about = "Ground station for laser plane")]
 pub struct Args {
+    #[clap(value_parser)]
+    firmware_bin_path: Option<String>,
     #[clap(short = 's', value_parser, default_value = "B000IV2L")]
     pilot_radio_serial: String,
     #[clap(short = 'b', value_parser, default_value = "57600")]
@@ -80,6 +83,17 @@ fn main() -> Result<()> {
 
     serial_driver.start_tasks(&runtime);
 
+    let mut defmt_decoder = match args.firmware_bin_path.as_ref() {
+        Some(path) => Some(
+            defmt_decoder::DefmtLogDecoder::new(path)
+                .context("Failed to load firmware bin file for log parsing")?,
+        ),
+        None => {
+            warn!("Missing firmware bin path. Defmt logs will not be displayed");
+            None
+        }
+    };
+
     const MIN_VAL: f32 = 0.001;
 
     let input_mapping = ControlMapping::default();
@@ -103,7 +117,13 @@ fn main() -> Result<()> {
         while let Ok(m) = fc_telemetry_rx.try_recv() {
             match m {
                 plane_core::FcOutput::StringLog(l) => tui.add_log(format!("FC: {l}")),
-                plane_core::FcOutput::DefmtLog(l) => tui.add_log(format!("DEFMT: {l:02X?}")),
+                plane_core::FcOutput::DefmtLog(defmt_log) => {
+                    if let Some(defmt) = defmt_decoder.as_mut() {
+                        if let Err(e) = defmt.decode(&defmt_log) {
+                            warn!("Pailed to parse defmt logs: {e:?}");
+                        }
+                    }
+                }
                 plane_core::FcOutput::Panic {
                     file,
                     line,

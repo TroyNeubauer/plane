@@ -23,3 +23,5 @@ log = "0.4.26"
 async-channel = "2.3.1"
 tokio-util = { version = "0.7.14", features = ["codec"] }
 futures-util = "0.3.31"
+defmt-decoder = "0.4.0"
+defmt-parser = "0.4.1"
