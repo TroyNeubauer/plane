@@ -2,8 +2,12 @@
 members = ["flight-controller", "gcs", "plane-core"]
 resolver = "3"
 
-[profile.release]
-debug = 2
-lto = true
-opt-level = 'z'
+[workspace.dependencies]
+postcard = "1.1.1"
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
 
+[profile.release]
+debug = 1
+lto = "fat"
+opt-level = 's'

@@ -35,12 +35,11 @@
             openocd
             minicom 
             minicom
-            #udev
             pkg-config
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ udev ];
 
           shellHook = ''
-            ${if pkgs.stdenv.isLinux then "LD_LIBRARY_PATH=${pkgs.udev}/lib" else ""}
+            ${if pkgs.stdenv.isLinux then "export LD_LIBRARY_PATH=${pkgs.udev}/lib" else ""}
           '';
         };
       in

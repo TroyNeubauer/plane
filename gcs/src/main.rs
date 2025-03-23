@@ -1,109 +1,27 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow};
+use async_channel::bounded as bounded_async;
 use clap::Parser;
-use gilrs::{Axis, Button, Event, EventType, Gilrs};
-use plane_core::{ControlState, FcInput, MAGIC, MSG_LEN};
-use serialport::SerialPortType;
+use gilrs::{Event, EventType, Gilrs};
+use log::{debug, error, info, warn};
+use plane_core::{ControlState, FcInput};
+use serial_driver::SerialDriver;
 use std::time::{Duration, Instant};
 use tui::TrimAdjuster;
 
+mod serial_driver;
 mod tui;
+mod tui_logger;
 
-#[derive(Clone, Debug)]
-pub enum GcsEvent {
-    // -1..1 desired pitch offset for elevators
-    Pitch(f32),
-    // -1..1 desired yaw offset for tail
-    Yaw(f32),
-    // -1..1 desired yaw offset for ailerons
-    Roll(f32),
-    // 0..1 desired throttle
-    Throttle(f32),
-    Arm,
-    Disarm,
-    NextTrim,
-    PreviousTrim,
-    MoreTrim,
-    LessTrim,
-}
-
-pub struct ControlMapping {
-    pitch: Axis,
-    yaw: Axis,
-    roll: Axis,
-    throttle: Axis,
-    arm: Button,
-    disarm: Button,
-    next_trim: Button,
-    prev_trim: Button,
-    more_trim: Button,
-    less_trim: Button,
-}
-
-impl ControlMapping {
-    fn map_to_message(&self, event: EventType) -> Option<GcsEvent> {
-        match event {
-            gilrs::EventType::ButtonPressed(button, _) => {
-                if button == self.disarm {
-                    return Some(GcsEvent::Disarm);
-                } else if button == self.next_trim {
-                    return Some(GcsEvent::NextTrim);
-                } else if button == self.prev_trim {
-                    return Some(GcsEvent::PreviousTrim);
-                } else if button == self.more_trim {
-                    return Some(GcsEvent::MoreTrim);
-                } else if button == self.less_trim {
-                    return Some(GcsEvent::LessTrim);
-                }
-            }
-            gilrs::EventType::ButtonRepeated(button, _) => {
-                if button == self.disarm {
-                    return Some(GcsEvent::Disarm);
-                }
-            }
-            gilrs::EventType::ButtonReleased(button, _) => {
-                if button == self.disarm {
-                    return Some(GcsEvent::Disarm);
-                } else if button == self.arm {
-                    return Some(GcsEvent::Arm);
-                }
-            }
-            gilrs::EventType::AxisChanged(axis, value, _) => {
-                if axis == self.pitch {
-                    return Some(GcsEvent::Pitch(value));
-                } else if axis == self.yaw {
-                    return Some(GcsEvent::Yaw(value));
-                } else if axis == self.roll {
-                    return Some(GcsEvent::Roll(value));
-                } else if axis == self.throttle {
-                    return Some(GcsEvent::Throttle(value));
-                }
-            }
-            _ => {}
-        }
-        None
-    }
-}
-
-impl Default for ControlMapping {
-    fn default() -> Self {
-        Self {
-            pitch: Axis::LeftStickY,
-            yaw: Axis::RightStickX,
-            roll: Axis::LeftStickX,
-            throttle: Axis::RightStickY,
-            arm: Button::RightTrigger,
-            disarm: Button::LeftTrigger,
-            next_trim: Button::DPadRight,
-            prev_trim: Button::DPadLeft,
-            more_trim: Button::DPadUp,
-            less_trim: Button::DPadDown,
-        }
-    }
-}
+mod types;
+use types::*;
 
 #[derive(Debug, Parser)]
 #[clap(about = "Ground station for laser plane")]
 pub struct Args {
+    #[clap(short = 's', value_parser, default_value = "B000IV2L")]
+    pilot_radio_serial: String,
+    #[clap(short = 'b', value_parser, default_value = "57600")]
+    pilot_radio_baud_rate: u32,
     #[clap(short = 'd', value_parser, default_value = "0.05")]
     deadband: f32,
     #[clap(value_parser, default_value = "150.0")]
@@ -116,55 +34,51 @@ pub struct Args {
     exponent: f32,
 }
 
-fn packet_for_input(input: &FcInput) -> Result<[u8; MSG_LEN]> {
-    let mut dst = [0u8; MSG_LEN];
-    // Magic
-    dst[0] = MAGIC;
-    postcard::to_slice(&input, &mut dst[1..])?;
-
-    Ok(dst)
-}
-
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    let (log_tx, log_rx) = crossbeam_channel::bounded(16);
+    tui_logger::init(log_tx);
 
     let mut gilrs = Gilrs::new().unwrap();
     let trim = match TrimAdjuster::from_config() {
         Ok(t) => {
-            println!("Loaded trim config: {t:?}");
+            info!("Loaded trim config: {t:#?}");
             t
         }
         Err(e) => {
-            println!("Failed to load trim config: {e:?}");
+            warn!("Failed to load trim config: {e:?}");
             Default::default()
         }
     };
-    let mut tui = tui::Tui::new(ratatui::init(), trim);
 
-    let mut tr = TrimAdjuster::default();
+    let mut tui = tui::Tui::new(ratatui::init(), trim, log_rx);
 
     let _ = gilrs
         .gamepads()
         .next()
         .ok_or_else(|| anyhow!("No gamepads detected"))?;
 
-    let port_info = 'outer: loop {
-        for info in serialport::available_ports().context("Failed to list serial ports")? {
-            if let SerialPortType::UsbPort(usb) = &info.port_type {
-                if usb.serial_number.as_deref() == Some("B000IV2L") {
-                    break 'outer info;
-                }
-            }
-            println!("{info:?}");
-        }
-        bail!("Failed to find local GCS radio");
+    // Consume stale events
+    while gilrs.next_event().is_some() {}
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let (fc_command_tx, fc_command_rx) = bounded_async(8);
+    let (fc_telemetry_tx, fc_telemetry_rx) = bounded_async(8);
+
+    let serial_driver = SerialDriver {
+        usb_serial_number: args.pilot_radio_serial,
+        baud_rate: args.pilot_radio_baud_rate,
+        fc_command_rx,
+        fc_telemetry_tx,
     };
 
-    tui.log(format!("Opening: {port_info:?}"));
-
-    let builder = serialport::new(port_info.port_name, 57600);
-
-    let mut port = builder.open().context("Failed to open serial port")?;
+    serial_driver.start_tasks(&runtime);
 
     const MIN_VAL: f32 = 0.001;
 
@@ -184,7 +98,24 @@ fn main() -> Result<()> {
     }
 
     'outer: loop {
-        tui.run();
+        tui.draw();
+
+        while let Ok(m) = fc_telemetry_rx.try_recv() {
+            match m {
+                plane_core::FcOutput::StringLog(l) => tui.add_log(format!("FC: {l}")),
+                plane_core::FcOutput::DefmtLog(_) => todo!(),
+                plane_core::FcOutput::Panic {
+                    file,
+                    line,
+                    col,
+                    message,
+                } => tui.add_log(format!(
+                    "FLIGHT CONTROLLER PANICKED: {file} {line}:{col} {message}",
+                )),
+            }
+        }
+
+        tui.update_logs();
 
         let now = Instant::now();
         let mut new_trim = false;
@@ -199,39 +130,49 @@ fn main() -> Result<()> {
                     GcsEvent::Roll(v) => raw_state.roll = exp(v, args.exponent),
                     GcsEvent::Throttle(v) => raw_state.throttle = exp(v.max(0.0), args.exponent),
                     GcsEvent::Arm => {
+                        if !armed {
+                            warn!("Flight controller ARMED");
+                        }
                         armed = true;
                     }
                     GcsEvent::Disarm => {
-                        break 'outer;
+                        if armed {
+                            info!("Flight controller disarmed");
+                        }
+                        armed = false;
                     }
                     GcsEvent::NextTrim => {
                         new_trim = true;
-                        tui.next_trim()
+                        tui.trim.next()
                     }
                     GcsEvent::PreviousTrim => {
                         new_trim = true;
-                        tui.previous_trim()
+                        tui.trim.previous()
                     }
                     GcsEvent::MoreTrim => {
                         new_trim = true;
-                        tui.more_trim()
+                        tui.trim.increase()
                     }
                     GcsEvent::LessTrim => {
                         new_trim = true;
-                        tui.less_trim()
+                        tui.trim.decrease()
+                    }
+                    GcsEvent::Exit => {
+                        info!("Received exit event. Exiting");
+                        break 'outer;
                     }
                 }
             }
 
             if let EventType::Disconnected = &event {
-                tui.log("Controller disconnected. Exiting");
+                info!("Controller disconnected. Exiting");
                 break 'outer;
             }
         }
 
         if new_trim {
-            if let Err(e) = tui.save_trim() {
-                tui.log(format!("Failed to save trim: {e:?}"));
+            if let Err(e) = tui.trim.save() {
+                error!("Failed to save trim: {e:?}");
             }
         }
 
@@ -241,7 +182,7 @@ fn main() -> Result<()> {
                 || raw_state.roll > args.deadband
                 || raw_state.throttle > args.deadband
             {
-                println!("Controller is disarmed. Press right trigger to arm vehicle");
+                warn!("Controller is disarmed. Press right trigger to arm vehicle");
             }
 
             raw_state = ControlState {
@@ -278,42 +219,35 @@ fn main() -> Result<()> {
             {
                 continue;
             }
-            tui.log(format!("Sending: {filtered_state:?}"));
+            debug!("Sending: {filtered_state:?}");
 
+            let command = FcInput::Controls(filtered_state.clone());
+            if fc_command_tx.try_send(command).is_err() {
+                debug!("Failed to send controls command to serial task");
+            }
             last_state_sent = filtered_state.clone();
-            let Ok(bytes) = packet_for_input(&FcInput {
-                trim: tr.config.clone(),
-                controls: filtered_state.clone(),
-                armed,
-            })
-            .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}"))) else {
-                continue;
-            };
-
-            port.write_all(&bytes)
-                .context("Failed to write to serial port")?;
-            port.flush().context("Failed to flush serial port")?;
 
             next_send = now + Duration::from_secs_f32(1.0 / args.send_rate_hz);
         }
 
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(3));
     }
     ratatui::restore();
+    // Drop to force logs to be printed to stdout
+    drop(tui);
 
-    if let Some(bytes) = packet_for_input(&FcInput {
-        trim: tui.trim(),
-        controls: Default::default(),
-        armed: false,
-    })
-    .map_err(|e| tui.log(format!("Failed to serialize control packet: {e:?}")))
-    .ok()
-    {
-        tui.log(format!("Sending final msg: {filtered_state:?}"));
-        port.write_all(&bytes)
-            .context("Failed to write to serial port")?;
-
-        port.flush().context("Failed to flush serial port")?;
+    info!("Disarming flight controller");
+    for _ in 0..5 {
+        let command = FcInput::Controls(Default::default());
+        if fc_command_tx.try_send(command).is_err() {
+            warn!("Failed to send disarm command to serial task");
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    info!("Disarm commands sent");
+    std::thread::sleep(Duration::from_millis(200));
+
+    runtime.shutdown_background();
+
     return Ok(());
 }

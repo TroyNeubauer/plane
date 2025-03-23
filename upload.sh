@@ -39,6 +39,8 @@ sudo umount $MOUNT_POINT
 
 echo "Upload complete!"
 
-sleep 2
-sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00
+cargo r --bin gcs
+
+# sleep 2
+# sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00
 

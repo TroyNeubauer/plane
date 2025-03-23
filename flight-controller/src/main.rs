@@ -5,23 +5,36 @@
 #![no_std]
 #![no_main]
 
-use defmt_rtt as _;
+mod logger;
+
+use core::cell::UnsafeCell;
+
+use bitflare::BitflareWriter;
 use embassy_executor::Spawner;
+use embassy_rp::flash::{self, Flash};
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{PIN_4, PWM_SLICE2, UART1, USB};
+use embassy_rp::pac::UART1;
+use embassy_rp::peripherals::{DMA_CH0, PIN_4, PIN_25, UART1};
 use embassy_rp::pwm::{self, ChannelAPin, ChannelBPin, Pwm, PwmError, PwmOutput, SetDutyCycle};
 use embassy_rp::uart::{self, Uart, UartRx, UartTx};
-use embassy_rp::usb::{self, Driver};
 use embassy_rp::{Peripheral, bind_interrupts};
+use embassy_sync::blocking_mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_time::Duration;
 use embassy_time::Timer;
-use log::warn;
+use embedded_hal_1::digital::OutputPin;
 use log::{error, info};
-
-use plane_core::{ControlState, FcInput, MAGIC, TrimConfig};
+use plane_core::{ControlState, FcInput, FcOutput, MAX_FC_OUTPUT_PACKET, TrimConfig};
 
 bind_interrupts!(struct Irqs {
     UART1_IRQ => uart::InterruptHandler<UART1>;
 });
+
+fn _embassy_trace_task_new(_executor_id: u32, _task_id: u32) {}
+fn _embassy_trace_task_exec_begin(_executor_id: u32, _task_id: u32) {}
+fn _embassy_trace_task_exec_end(_excutor_id: u32, _task_id: u32) {}
+fn _embassy_trace_task_ready_begin(_executor_id: u32, _task_id: u32) {}
+fn _embassy_trace_executor_idle(_executor_id: u32) {}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -34,24 +47,51 @@ async fn main(spawner: Spawner) {
     }
 }
 
+const FLASH_SIZE: usize = 2 * 1024 * 1024;
+// const PERSISTED_DATA_OFFSET: u32 = 0x100000;
+const MAX_PERSISTED_BYTES: usize = 256;
+
+pub struct PersistedData {
+    trim_config: TrimConfig,
+}
+
+async fn load_trim_or_default(
+    flash: &mut Flash<'_, embassy_rp::peripherals::FLASH, flash::Blocking, FLASH_SIZE>,
+) -> TrimConfig {
+    let mut buf = [0u8; MAX_PERSISTED_BYTES];
+
+    flash.blocking_read(0, &mut buf).unwrap();
+    todo!();
+
+    /*
+    let mut trim_config: PersistedData = if buf[0] == 0xba {
+        postcard::from_bytes::<TrimConfig>(&buf[1..]).expect("has trim config")
+    } else {
+        TrimConfig::default()
+    };
+    */
+}
+
 // async fn logger_task<'d, T: uart::Instance, M: uart::Mode>(uart: UartTx<'d, T, M>) {
 //
 // }
 
 async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
-    prop.set_from_axis_control(1.0);
+    let _ = prop.set_from_axis_control(1.0);
     Timer::after_secs(3).await;
-    prop.set_from_axis_control(-1.0);
+    let _ = prop.set_from_axis_control(-1.0);
     Timer::after_secs(3).await;
-    prop.set_from_axis_control(0.0);
+    let _ = prop.set_from_axis_control(0.0);
 }
 
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
 async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     let p = embassy_rp::init(Default::default());
+    // let mut memory = Flash::<_, flash::Blocking, FLASH_SIZE>::new_blocking(p.FLASH);
+
     // pi pico visible LED
-    // let led = Output::new(p.PIN_25, Level::Low);
+    let mut led = Output::new(p.PIN_25, Level::Low);
 
     let (mut elevator, mut prop) = RawPwm::new_ab(
         p.PWM_SLICE3,
@@ -85,6 +125,8 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
 
     let mut config = uart::Config::default();
     config.baudrate = 57600;
+
+    // NOTE: if changing serial pins, make sure to change the panic handler as well
     let uart = Uart::new(
         p.UART1, p.PIN_4, p.PIN_5, Irqs, p.DMA_CH0, p.DMA_CH1, config,
     );
@@ -94,48 +136,81 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     //     .spawn(logger_task(uart_tx))
     //     .map_err(|_| "failed to spawn logger task")?;
 
-    let mut state = ControlState::default();
+    let mut buf = [0u8; MAX_FC_OUTPUT_PACKET];
 
+    let mut i = 0;
     loop {
-        uart_tx.write(b"Writing to UART!\n").await;
+        led.toggle();
+
+        defmt::trace!("trace");
+        // defmt::debug!("debug");
+        // defmt::info!("info");
+        // defmt::warn!("warn");
+        // defmt::error!("error");
+
+        let mut writer = BitflareWriter::new(&mut buf);
+        writer
+            .write_payload(|dst| {
+                let msg = FcOutput::StringLog("Hello world!".into());
+                let payload = postcard::to_slice(&msg, dst).map_err(|_| ())?;
+                Ok(payload.len())
+            })
+            .unwrap();
+
+        let bytes = writer.finish();
+        uart_tx.write(bytes).await.unwrap();
+
+        i += 1;
+        if i == 5 {
+            let name = "Bob Dingus";
+            panic!("DINGUS: {i}, {name}");
+        }
+
         Timer::after_secs(1).await;
     }
 
+    let mut armed = false;
     let mut trim_config: TrimConfig = TrimConfig::default();
+    let mut flight_controls = ControlState::default();
+
     log::info!("Reading...");
     loop {
         let mut buf = [0; 40];
         if let Err(e) = uart_rx.read(&mut buf).await {
             uart_tx.write(b"failed to read data!").await;
         }
-        if buf[0] != MAGIC {
-            uart_tx.write(b"off magic!").await;
-        } else {
-            let payload = &buf[1..];
-            if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
-                info!("{cmd:?}");
-                uart_tx.write(b"gotcmd").await;
-                state.pitch = cmd.controls.pitch;
-                state.yaw = cmd.controls.yaw;
-                state.roll = cmd.controls.roll;
-                state.throttle = cmd.controls.throttle;
 
-                if trim_config != cmd.trim {
+        let payload = &buf[1..];
+        if let Ok(cmd) = postcard::from_bytes::<FcInput>(payload) {
+            match cmd {
+                FcInput::Trim(new_trim) => {
+                    trim_config = new_trim;
+
+                    // TODO: Save trim config to flash
+
                     elevator.max_percent =
                         MAX_PERC_DFL + (trim_config.elevator_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                     left_aleron.max_percent =
-                        MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                        MAX_PERC_DFL + (new_trim.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                     right_aleron.max_percent =
-                        MAX_PERC_DFL + (trim_config.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
+                        MAX_PERC_DFL + (new_trim.roll_range * (MAX_PERC_DFL - MIN_PERC_DFL));
                 }
-
-                trim_config = cmd.trim;
-
-                let _ = left_aleron.set_from_axis_control(-state.roll + trim_config.left_aileron);
-                let _ = right_aleron.set_from_axis_control(-state.roll + trim_config.right_aileron);
-                let _ = elevator.set_from_axis_control(-state.pitch - trim_config.elevator);
-                let _ = prop.set_from_axis_control(state.throttle);
+                FcInput::Controls(new_controls) => {
+                    flight_controls = new_controls;
+                }
+                FcInput::Arm => armed = true,
+                FcInput::Disarm => armed = false,
             }
+
+            let pitch = flight_controls.pitch;
+            let yaw = flight_controls.yaw;
+            let roll = flight_controls.roll;
+            let throttle = if armed { flight_controls.throttle } else { 0.0 };
+
+            let _ = left_aleron.set_from_axis_control(-roll + trim_config.left_aileron);
+            let _ = right_aleron.set_from_axis_control(-roll + trim_config.right_aileron);
+            let _ = elevator.set_from_axis_control(-pitch - trim_config.elevator);
+            let _ = prop.set_from_axis_control(throttle);
         }
     }
 }
@@ -245,8 +320,80 @@ async fn blink_led(mut led: Output<'static>) {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    loop {
-        log::error!("{info:?}");
-        let _ = embassy_futures::poll_once(embassy_futures::yield_now());
-    }
+    critical_section::with(|_cs| {
+        use core::fmt::Write;
+
+        let mut buf = [0u8; MAX_FC_OUTPUT_PACKET];
+
+        let mut config = uart::Config::default();
+        config.baudrate = 57600;
+
+        // Safety: not safe, were panicking hope for the best.
+        // At least were in a critical section, but logs will be likely corrupted
+        let uart = unsafe { UART1::steal() };
+        let gpio = unsafe { PIN_4::steal() };
+        let dma = unsafe { DMA_CH0::steal() };
+
+        let mut uart = UartTx::<UART1, uart::Blocking>::new(uart, gpio, dma, config);
+
+        let mut writer = BitflareWriter::new(&mut buf);
+        writer
+            .write_payload(|dst| {
+                let (file, line, col) = match info.location() {
+                    Some(loc) => {
+                        // If name is too big, grab last part since that is most important
+                        let start_idx = loc.file().len().saturating_sub(24);
+                        let file = &loc.file()[start_idx..];
+
+                        (file.into(), loc.line() as u16, loc.column() as u16)
+                    }
+                    None => (Default::default(), 0, 0),
+                };
+                let mut message = heapless::String::new();
+                write!(&mut message, "{}", info.message());
+
+                let payload = FcOutput::Panic {
+                    file,
+                    line,
+                    col,
+                    message,
+                };
+                let payload = postcard::to_slice(&payload, dst).map_err(|_| ())?;
+                Ok(payload.len())
+            })
+            .unwrap();
+
+        let bytes = writer.finish();
+
+        let _ = uart.blocking_write(bytes);
+        let _ = uart.blocking_write(bytes);
+        let _ = uart.blocking_write(bytes);
+
+        let led_pin = unsafe { PIN_25::steal() };
+        let mut led = Output::new(led_pin, Level::Low);
+
+        // Rapid help blick
+        for _ in 0..200 {
+            for action in small_morse::encode("SOS ") {
+                if action.state == small_morse::State::On {
+                    led.set_high();
+                } else {
+                    led.set_low();
+                }
+
+                let timeout = action.duration as u32 * Duration::from_millis(100);
+                embassy_time::block_for(timeout);
+            }
+
+            led.set_low();
+            embassy_time::block_for(Duration::from_secs(1));
+        }
+        cortex_m::asm::udf();
+    })
+}
+
+#[defmt::panic_handler]
+fn defmt_panic() -> ! {
+    // reset, defmt already called our regular panic
+    cortex_m::asm::udf();
 }
