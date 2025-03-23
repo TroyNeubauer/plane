@@ -20,6 +20,7 @@ use embassy_rp::uart::{self, Uart, UartRx, UartTx};
 use embassy_rp::{Peripheral, bind_interrupts};
 use embassy_sync::blocking_mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex as AsyncMutex;
 use embassy_time::Duration;
 use embassy_time::Timer;
 use embedded_hal_1::digital::OutputPin;
@@ -72,6 +73,22 @@ async fn load_trim_or_default(
     */
 }
 
+pub static RADIO_SERIAL: AsyncMutex<CriticalSectionRawMutex, Option<UartTx<UART1, uart::Async>>> =
+    AsyncMutex::new(None);
+
+pub async fn with_radio_serial<F, R>(f: F) -> Option<R>
+where
+    F: AsyncFn(&mut UartTx<UART1, uart::Async>) -> R,
+{
+    let mut guard = RADIO_SERIAL.lock().await;
+    if let Some(serial) = guard.as_mut() {
+        let future = f(serial);
+        Some(future.await)
+    } else {
+        None
+    }
+}
+
 // async fn logger_task<'d, T: uart::Instance, M: uart::Mode>(uart: UartTx<'d, T, M>) {
 //
 // }
@@ -86,7 +103,9 @@ async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
 
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
-async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
+async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
+    logger::set_spawner(spawner);
+
     let p = embassy_rp::init(Default::default());
     // let mut memory = Flash::<_, flash::Blocking, FLASH_SIZE>::new_blocking(p.FLASH);
 
@@ -132,21 +151,21 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     );
     let (mut uart_tx, mut uart_rx) = uart.split();
 
+    {
+        let mut radio_serial = RADIO_SERIAL.lock().await;
+        *radio_serial = Some(uart_tx);
+    }
+
     // spawner
     //     .spawn(logger_task(uart_tx))
     //     .map_err(|_| "failed to spawn logger task")?;
 
+    Timer::after_secs(3).await;
+
     let mut buf = [0u8; MAX_FC_OUTPUT_PACKET];
 
-    let mut i = 0;
     loop {
         led.toggle();
-
-        defmt::trace!("trace");
-        // defmt::debug!("debug");
-        // defmt::info!("info");
-        // defmt::warn!("warn");
-        // defmt::error!("error");
 
         let mut writer = BitflareWriter::new(&mut buf);
         writer
@@ -158,15 +177,19 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
             .unwrap();
 
         let bytes = writer.finish();
-        uart_tx.write(bytes).await.unwrap();
-
-        i += 1;
-        if i == 5 {
-            let name = "Bob Dingus";
-            panic!("DINGUS: {i}, {name}");
-        }
+        with_radio_serial(async |uart_tx| {
+            uart_tx.write(bytes).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         Timer::after_secs(1).await;
+
+        defmt::trace!("trace");
+        defmt::debug!("debug");
+        defmt::info!("info");
+        defmt::warn!("warn");
+        defmt::error!("error");
     }
 
     let mut armed = false;
@@ -177,7 +200,7 @@ async fn main_inner(_spawner: Spawner) -> Result<(), &'static str> {
     loop {
         let mut buf = [0; 40];
         if let Err(e) = uart_rx.read(&mut buf).await {
-            uart_tx.write(b"failed to read data!").await;
+            uart_tx.write(b"failed to read data!").await.unwrap();
         }
 
         let payload = &buf[1..];
@@ -350,7 +373,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
                     None => (Default::default(), 0, 0),
                 };
                 let mut message = heapless::String::new();
-                write!(&mut message, "{}", info.message());
+                let _ = write!(&mut message, "{}", info.message());
 
                 let payload = FcOutput::Panic {
                     file,
@@ -372,8 +395,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         let led_pin = unsafe { PIN_25::steal() };
         let mut led = Output::new(led_pin, Level::Low);
 
-        // Rapid help blick
-        for _ in 0..200 {
+        loop {
+            // Rapid help blick
             for action in small_morse::encode("SOS ") {
                 if action.state == small_morse::State::On {
                     led.set_high();
@@ -388,7 +411,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
             led.set_low();
             embassy_time::block_for(Duration::from_secs(1));
         }
-        cortex_m::asm::udf();
     })
 }
 

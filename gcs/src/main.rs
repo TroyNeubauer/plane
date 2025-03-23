@@ -69,7 +69,7 @@ fn main() -> Result<()> {
         .expect("Failed to create tokio runtime");
 
     let (fc_command_tx, fc_command_rx) = bounded_async(8);
-    let (fc_telemetry_tx, fc_telemetry_rx) = bounded_async(8);
+    let (fc_telemetry_tx, fc_telemetry_rx) = bounded_async(64);
 
     let serial_driver = SerialDriver {
         usb_serial_number: args.pilot_radio_serial,
@@ -103,7 +103,7 @@ fn main() -> Result<()> {
         while let Ok(m) = fc_telemetry_rx.try_recv() {
             match m {
                 plane_core::FcOutput::StringLog(l) => tui.add_log(format!("FC: {l}")),
-                plane_core::FcOutput::DefmtLog(_) => todo!(),
+                plane_core::FcOutput::DefmtLog(l) => tui.add_log(format!("DEFMT: {l:02X?}")),
                 plane_core::FcOutput::Panic {
                     file,
                     line,

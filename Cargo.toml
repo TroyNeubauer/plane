@@ -5,7 +5,8 @@ resolver = "3"
 [workspace.dependencies]
 postcard = "1.1.1"
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
-bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
+# bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
+bitflare = { path = "../bitflare", default-features = false }
 
 [profile.release]
 debug = 1

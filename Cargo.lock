@@ -219,7 +219,6 @@ checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 [[package]]
 name = "bitflare"
 version = "0.0.0"
-source = "git+https://github.com/TroyNeubauer/bitflare.git#b2bc067fe4d22270453b2bee7aee18a372ad5e3c"
 dependencies = [
  "crc",
  "heapless 0.7.17",
