@@ -5,7 +5,10 @@ use gilrs::{Event, EventType, Gilrs};
 use log::{debug, error, info, warn};
 use plane_core::{ControlState, FcInput};
 use serial_driver::SerialDriver;
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tui::TrimAdjuster;
 
 mod defmt_decoder;
@@ -35,13 +38,33 @@ pub struct Args {
     alpha: f32,
     #[clap(value_parser, default_value = "1.6")]
     exponent: f32,
+    #[clap(short = 'a', value_parser, default_value = "true")]
+    always_send_controls: bool,
+    #[clap(value_parser, default_value = "./logs")]
+    log_dir: Option<String>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    let (text_log_path, serial_tx_log_path, serial_rx_log_path) = if let Some(dir) = args.log_dir {
+        let _ = std::fs::create_dir_all(&dir);
+
+        let mut text = PathBuf::from(&dir);
+        text.push(timestamped_file_name("log", "txt"));
+
+        let mut serial_tx = PathBuf::from(&dir);
+        serial_tx.push(timestamped_file_name("serial_tx", "bin"));
+
+        let mut serial_rx = PathBuf::from(&dir);
+        serial_rx.push(timestamped_file_name("serial_rx", "bin"));
+        (Some(text), Some(serial_tx), Some(serial_rx))
+    } else {
+        (None, None, None)
+    };
+
     let (log_tx, log_rx) = crossbeam_channel::bounded(16);
-    tui_logger::init(log_tx);
+    tui_logger::init(log_tx, text_log_path.as_deref());
 
     let mut gilrs = Gilrs::new().unwrap();
     let trim = match TrimAdjuster::from_config() {
@@ -79,6 +102,8 @@ fn main() -> Result<()> {
         baud_rate: args.pilot_radio_baud_rate,
         fc_command_rx,
         fc_telemetry_tx,
+        tx_log_path: serial_tx_log_path,
+        rx_log_path: serial_rx_log_path,
     };
 
     serial_driver.start_tasks(&runtime);
@@ -191,6 +216,11 @@ fn main() -> Result<()> {
         }
 
         if new_trim {
+            let command = FcInput::Trim(tui.trim.values());
+            if fc_command_tx.try_send(command).is_err() {
+                debug!("Failed to send controls command to serial task");
+            }
+
             if let Err(e) = tui.trim.save() {
                 error!("Failed to save trim: {e:?}");
             }
@@ -235,7 +265,7 @@ fn main() -> Result<()> {
                 && last_state_sent.yaw.abs() < MIN_VAL
                 && last_state_sent.roll.abs() < MIN_VAL
                 && last_state_sent.throttle.abs() < MIN_VAL
-                && !new_trim
+                && !args.always_send_controls
             {
                 continue;
             }
@@ -270,4 +300,14 @@ fn main() -> Result<()> {
     runtime.shutdown_background();
 
     return Ok(());
+}
+
+pub fn timestamped_file_name(prefix: &str, extension: &str) -> String {
+    let now = SystemTime::now();
+    let now = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!(
+        "{prefix}_{}.{:03}.{extension}",
+        now.as_secs(),
+        now.subsec_millis()
+    )
 }

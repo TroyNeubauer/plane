@@ -236,9 +236,12 @@ checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 [[package]]
 name = "bitflare"
 version = "0.0.0"
+source = "git+https://github.com/TroyNeubauer/bitflare.git#87e3466c762160b09d7333890039353f03d927d1"
 dependencies = [
  "crc",
+ "defmt",
  "heapless 0.7.17",
+ "log",
  "memchr",
 ]
 
@@ -887,18 +890,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embassy-usb-logger"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad40e3ec749d83f4b7ab0c0599c9bef0c51a73ce1c1087d8599ff2448d00c2aa"
-dependencies = [
- "embassy-futures",
- "embassy-sync",
- "embassy-usb",
- "log",
-]
-
-[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1119,7 +1110,6 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embassy-usb",
- "embassy-usb-logger",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
@@ -1129,7 +1119,6 @@ dependencies = [
  "fixed",
  "fixed-macro",
  "heapless 0.7.17",
- "log",
  "plane-core",
  "portable-atomic",
  "postcard",
@@ -1251,6 +1240,7 @@ dependencies = [
  "bitflare",
  "clap",
  "crossbeam-channel",
+ "defmt",
  "defmt-decoder",
  "defmt-parser",
  "futures-util",
@@ -1383,6 +1373,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
 dependencies = [
  "atomic-polyfill",
+ "defmt",
  "hash32 0.2.1",
  "rustc_version 0.4.1",
  "serde",
@@ -1922,6 +1913,7 @@ name = "plane-core"
 version = "0.1.0"
 dependencies = [
  "bitflare",
+ "defmt",
  "heapless 0.7.17",
  "postcard",
  "serde",

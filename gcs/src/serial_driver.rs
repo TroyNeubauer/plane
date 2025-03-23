@@ -3,7 +3,10 @@ use async_channel::{Receiver, Sender};
 use bitflare::{BitflareReader, BitflareWriter};
 use log::{error, info, warn};
 use plane_core::{FcInput, FcOutput, MAX_FC_INPUT_PAYLOAD, MAX_FC_OUTPUT_PACKET};
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     runtime::Runtime,
@@ -15,6 +18,8 @@ pub struct SerialDriver {
     pub baud_rate: u32,
     pub fc_command_rx: Receiver<FcInput>,
     pub fc_telemetry_tx: Sender<FcOutput>,
+    pub tx_log_path: Option<PathBuf>,
+    pub rx_log_path: Option<PathBuf>,
 }
 
 pub mod rates {
@@ -65,9 +70,13 @@ impl SerialDriver {
                 };
                 let (rx, tx) = tokio::io::split(port);
 
+                let (tx_file, rx_file) =
+                    create_log_files(self.tx_log_path.as_deref(), self.rx_log_path.as_deref())
+                        .await;
+
                 match tokio::try_join!(
-                    write_commands_task(tx, &self.fc_command_rx),
-                    read_telemetry_task(rx, &self.fc_telemetry_tx)
+                    write_commands_task(tx, &self.fc_command_rx, tx_file),
+                    read_telemetry_task(rx, &self.fc_telemetry_tx, rx_file)
                 ) {
                     Ok(_) => {
                         error!("Serial tasks ended early");
@@ -82,9 +91,45 @@ impl SerialDriver {
     }
 }
 
+async fn create_log_files(
+    tx_log_path: Option<&Path>,
+    rx_log_path: Option<&Path>,
+) -> (Option<tokio::fs::File>, Option<tokio::fs::File>) {
+    let tx = match tx_log_path.as_ref() {
+        Some(p) => match tokio::fs::File::create(p).await {
+            Ok(f) => {
+                info!("Created log file {p:?} successfully");
+                Some(f)
+            }
+            Err(e) => {
+                warn!("Failed to create output file {p:?}: {e:?}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    let rx = match rx_log_path.as_ref() {
+        Some(p) => match tokio::fs::File::create(p).await {
+            Ok(f) => {
+                info!("Created log file {p:?} successfully");
+                Some(f)
+            }
+            Err(e) => {
+                warn!("Failed to create output file {p:?}: {e:?}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    (tx, rx)
+}
+
 async fn write_commands_task(
     mut port: WriteHalf<SerialStream>,
     fc_command_rx: &Receiver<FcInput>,
+    mut log_file: Option<tokio::fs::File>,
 ) -> Result<()> {
     let mut buf = [0u8; MAX_FC_INPUT_PAYLOAD + 4];
     while let Ok(msg) = fc_command_rx.recv().await {
@@ -102,6 +147,12 @@ async fn write_commands_task(
                 .await
                 .context("Failed to write to pilot radio")?;
             rates::add_bytes_up(bytes.len());
+
+            if let Some(f) = log_file.as_mut() {
+                if let Err(e) = f.write_all(bytes).await {
+                    warn!("Failed to write to serial tx logfile: {e:?}");
+                }
+            }
         }
     }
     bail!("flight controller command channel closed early");
@@ -110,6 +161,7 @@ async fn write_commands_task(
 async fn read_telemetry_task(
     mut port: ReadHalf<SerialStream>,
     fc_telemetry_tx: &Sender<FcOutput>,
+    mut log_file: Option<tokio::fs::File>,
 ) -> Result<()> {
     let mut buf = vec![0u8; 4096];
 
@@ -119,9 +171,10 @@ async fn read_telemetry_task(
             .read(&mut buf)
             .await
             .context("Failed to read from pilot radio")?;
+        let buf = &buf[..n];
         rates::add_bytes_down(n);
 
-        reader.decode(&buf[..n], |payload| {
+        reader.decode(buf, |payload| {
             let Ok(t) = postcard::from_bytes::<FcOutput>(payload)
                 .map_err(|e| warn!("Failed to deserialize postcard message: {e:?}"))
             else {
@@ -132,6 +185,12 @@ async fn read_telemetry_task(
                 warn!("Failed to send fc telemetry message to main thread: {e:?}");
             }
         });
+
+        if let Some(f) = log_file.as_mut() {
+            if let Err(e) = f.write_all(buf).await {
+                warn!("Failed to write to serial rx logfile: {e:?}");
+            }
+        }
     }
 }
 

@@ -57,6 +57,14 @@ impl ControlMapping {
             gilrs::EventType::ButtonRepeated(button, _) => {
                 if button == self.disarm {
                     return Some(GcsEvent::Disarm);
+                } else if button == self.next_trim {
+                    return Some(GcsEvent::NextTrim);
+                } else if button == self.prev_trim {
+                    return Some(GcsEvent::PreviousTrim);
+                } else if button == self.more_trim {
+                    return Some(GcsEvent::MoreTrim);
+                } else if button == self.less_trim {
+                    return Some(GcsEvent::LessTrim);
                 }
             }
             gilrs::EventType::ButtonReleased(button, _) => {

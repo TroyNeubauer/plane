@@ -12,12 +12,14 @@ ratatui = "0.29.0"
 serde_json = "1.0.140"
 strum = "0.27.1"
 strum_macros = "0.27.1"
-tokio = { version = "1.44.1", default-features = false, features = ["io-util", "rt", "rt-multi-thread", "time", "macros"] }
+tokio = { version = "1.44.1", default-features = false, features = ["io-util", "rt", "rt-multi-thread", "time", "macros", "fs"] }
 tokio-serial = "5.4.5"
 
 postcard = { workspace = true }
 serde = { workspace = true }
-bitflare = { workspace = true }
+bitflare = { workspace = true, features = ["log"] }
+defmt = { workspace = true }
+
 crossbeam-channel = "0.5.14"
 log = "0.4.26"
 async-channel = "2.3.1"

@@ -4,9 +4,10 @@ resolver = "3"
 
 [workspace.dependencies]
 postcard = "1.1.1"
+bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
+defmt = "0.3"
+heapless = { version = "0.7", features = ["defmt-impl"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
-# bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
-bitflare = { path = "../bitflare", default-features = false }
 
 [profile.release]
 debug = 1

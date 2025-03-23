@@ -11,5 +11,5 @@ std = []
 postcard = { workspace = true }
 serde = { workspace = true }
 bitflare = { workspace = true }
-
-heapless = "0.7.0"
+heapless = { workspace = true }
+defmt = { workspace = true }
