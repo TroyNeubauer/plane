@@ -65,6 +65,7 @@ impl log::Log for TuiLogger {
                 let mut f = mutex.lock().unwrap();
                 let (file, buf) = f.deref_mut();
 
+                buf.clear();
                 use std::io::Write;
                 let _ = writeln!(buf, "{src_file: >24}:{src_line}:  {}", &line);
 

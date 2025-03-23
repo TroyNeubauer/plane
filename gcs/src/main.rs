@@ -1,12 +1,14 @@
 use anyhow::{Context, Result, anyhow};
 use async_channel::bounded as bounded_async;
 use clap::Parser;
+use futures_util::StreamExt;
 use gilrs::{Event, EventType, Gilrs};
 use log::{debug, error, info, warn};
 use plane_core::{ControlState, FcInput};
 use serial_driver::SerialDriver;
 use std::{
     path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tui::TrimAdjuster;
@@ -108,6 +110,9 @@ fn main() -> Result<()> {
 
     serial_driver.start_tasks(&runtime);
 
+    let usb_watcher = nusb::watch_devices().context("Failed to start usb watcher")?;
+    runtime.spawn(usb_scan_task(usb_watcher));
+
     let mut defmt_decoder = match args.firmware_bin_path.as_ref() {
         Some(path) => Some(
             defmt_decoder::DefmtLogDecoder::new(path)
@@ -121,6 +126,7 @@ fn main() -> Result<()> {
 
     const MIN_VAL: f32 = 0.001;
 
+    let mut sent_fc_usb_reset_cmd = false;
     let input_mapping = ControlMapping::default();
     let mut next_send = Instant::now();
     let mut next_filter = Instant::now();
@@ -165,9 +171,17 @@ fn main() -> Result<()> {
         let now = Instant::now();
         let mut new_trim = false;
 
+        if sent_fc_usb_reset_cmd && RPI_CONNECTED_ON_USB.load(Ordering::Relaxed) {
+            info!("Detected rpi on usb in boot mode. Ready to reflash - exiting");
+
+            std::thread::sleep(Duration::from_millis(200));
+            break 'outer;
+        }
+
         // Update state based on events
-        while let Some(Event { event, .. }) = gilrs.next_event() {
-            if let Some(msg) = input_mapping.map_to_message(event) {
+        while let Some(Event { id, event, .. }) = gilrs.next_event() {
+            let gamepad = gilrs.gamepad(id);
+            if let Some(msg) = input_mapping.map_to_message(event, gamepad) {
                 match msg {
                     // Invert pitch so that pulling stick towards you makes plane pitch up
                     GcsEvent::Pitch(v) => raw_state.pitch = -exp(v, args.exponent),
@@ -205,6 +219,18 @@ fn main() -> Result<()> {
                     GcsEvent::Exit => {
                         info!("Received exit event. Exiting");
                         break 'outer;
+                    }
+                    GcsEvent::ResetFcToUsbBoot => {
+                        if armed {
+                            error!("Refusing to reset flight controller while armed");
+                        } else {
+                            sent_fc_usb_reset_cmd = true;
+                            info!("Sent reset command to flight controller");
+                            let command = FcInput::ResetToUsbBoot;
+                            if fc_command_tx.try_send(command).is_err() {
+                                warn!("Failed to send controls command to serial task");
+                            }
+                        }
                     }
                 }
             }
@@ -300,6 +326,33 @@ fn main() -> Result<()> {
     runtime.shutdown_background();
 
     return Ok(());
+}
+
+static RPI_CONNECTED_ON_USB: AtomicBool = AtomicBool::new(false);
+
+async fn usb_scan_task(mut usb_watcher: nusb::hotplug::HotplugWatch) {
+    const VENDOR_ID: u16 = 0x2E8A;
+    const PRODUCT_ID: u16 = 0x0003;
+
+    if let Ok(mut devs) = nusb::list_devices() {
+        if devs.any(|d| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID) {
+            RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
+            info!("RPI detected");
+        }
+    }
+
+    while let Some(event) = usb_watcher.next().await {
+        info!("USB event: {event:?}");
+        match event {
+            nusb::hotplug::HotplugEvent::Connected(info) => {
+                if info.vendor_id() == VENDOR_ID && info.product_id() == PRODUCT_ID {
+                    RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
+                    info!("RPI detected");
+                }
+            }
+            _ => {}
+        };
+    }
 }
 
 pub fn timestamped_file_name(prefix: &str, extension: &str) -> String {

@@ -15,6 +15,7 @@ pub enum FcInput {
     Controls(ControlState),
     Arm,
     Disarm,
+    ResetToUsbBoot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Format)]

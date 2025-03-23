@@ -40,7 +40,7 @@ fn _embassy_trace_task_ready_begin(_executor_id: u32, _task_id: u32) {
     // defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
 }
 #[unsafe(no_mangle)]
-fn _embassy_trace_executor_idle(executor_id: u32) {
+fn _embassy_trace_executor_idle(_executor_id: u32) {
     // defmt::info!("_embassy_trace_task_new {}", _executor_id);
 }
 
@@ -203,6 +203,9 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                     }
                     FcInput::Arm => armed = true,
                     FcInput::Disarm => armed = false,
+                    FcInput::ResetToUsbBoot => {
+                        embassy_rp::rom_data::reset_to_usb_boot(0, 0);
+                    }
                 }
 
                 let pitch = flight_controls.pitch;
