@@ -93,10 +93,13 @@ fn main() -> Result<()> {
 
     let mut tui = tui::Tui::new(ratatui::init(), trim, log_rx);
 
-    let _ = gilrs
-        .gamepads()
-        .next()
-        .ok_or_else(|| anyhow!("No gamepads detected"))?;
+    #[cfg(not(target_os = "macos"))] 
+    {
+        let _ = gilrs
+            .gamepads()
+            .next()
+            .ok_or_else(|| anyhow!("No gamepads detected"))?;
+    }
 
     // Consume stale events
     while gilrs.next_event().is_some() {}

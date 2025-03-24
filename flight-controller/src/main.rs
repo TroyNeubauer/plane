@@ -118,10 +118,19 @@ where
 
 async fn arm_esc<'a>(prop: &mut RawPwm<'a>) {
     let _ = prop.set_from_axis_control(1.0);
+    info!("set upper limit");
     Timer::after_secs(3).await;
+
     let _ = prop.set_from_axis_control(-1.0);
+    info!("set lower limit");
+
     Timer::after_secs(3).await;
     let _ = prop.set_from_axis_control(0.0);
+    info!("neutral");
+
+    Timer::after_secs(10).await;
+    let _ = prop.set_from_axis_control(-1.0);
+    info!("0.0");
 }
 
 const MAX_PERC_DFL: f32 = 0.02;
@@ -134,6 +143,7 @@ async fn main_inner(spawner: embassy_executor::Spawner) -> Result<(), &'static s
 
     // pi pico visible LED
     let mut led = Output::new(p.PIN_25, Level::Low);
+    
 
     let (mut elevator, mut prop) = RawPwm::new_ab(
         p.PWM_SLICE3,
@@ -154,6 +164,10 @@ async fn main_inner(spawner: embassy_executor::Spawner) -> Result<(), &'static s
         MIN_PERC_DFL,
         MAX_PERC_DFL,
     );
+    
+    warn!("Arming esc");
+    arm_esc(&mut prop).await;
+    info!("ESC armed");
 
     let _ = left_aleron.set_from_axis_control(0.0);
     let _ = right_aleron.set_from_axis_control(0.0);
@@ -175,9 +189,6 @@ async fn main_inner(spawner: embassy_executor::Spawner) -> Result<(), &'static s
 
     Timer::after_secs(2).await;
 
-    warn!("Arming esc");
-    arm_esc(&mut prop).await;
-    info!("ESC armed");
 
     // spawner.spawn(blink_led(led)).expect("failed to spawn task");
 
