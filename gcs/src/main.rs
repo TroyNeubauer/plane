@@ -206,11 +206,19 @@ fn main() -> Result<()> {
                         if !armed {
                             warn!("Flight controller ARMED");
                         }
+                        let command = FcInput::Arm;
+                        if fc_command_tx.try_send(command).is_err() {
+                            warn!("Failed to send controls command to serial task");
+                        }
                         armed = true;
                     }
                     GcsEvent::Disarm => {
                         if armed {
                             info!("Flight controller disarmed");
+                        }
+                        let command = FcInput::Disarm;
+                        if fc_command_tx.try_send(command).is_err() {
+                            warn!("Failed to send controls command to serial task");
                         }
                         armed = false;
                     }

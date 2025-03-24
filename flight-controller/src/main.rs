@@ -127,10 +127,6 @@ async fn arm_esc<'a>(prop: &mut RawPwm<'a>) {
     Timer::after_secs(3).await;
     let _ = prop.set_from_axis_control(0.0);
     info!("neutral");
-
-    Timer::after_secs(10).await;
-    let _ = prop.set_from_axis_control(-1.0);
-    info!("0.0");
 }
 
 const MAX_PERC_DFL: f32 = 0.02;
@@ -247,7 +243,8 @@ async fn main_inner(spawner: embassy_executor::Spawner) -> Result<(), &'static s
                 let _ = left_aleron.set_from_axis_control(roll + trim_config.left_aileron);
                 let _ = right_aleron.set_from_axis_control(roll + trim_config.right_aileron);
                 let _ = elevator.set_from_axis_control(pitch - trim_config.elevator);
-                let _ = prop.set_from_axis_control(throttle);
+                info!("-throttle {} {}", -throttle, armed);
+                let _ = prop.set_from_axis_control(-throttle);
             }
         });
     }
