@@ -5,6 +5,7 @@ use log::{error, info, warn};
 use plane_core::{FcInput, FcOutput, MAX_FC_INPUT_PAYLOAD, MAX_FC_OUTPUT_PACKET};
 use std::{
     path::{Path, PathBuf},
+    sync::atomic::Ordering,
     time::Duration,
 };
 use tokio::{
@@ -182,7 +183,10 @@ async fn read_telemetry_task(
             };
 
             if let Err(e) = fc_telemetry_tx.try_send(t) {
-                warn!("Failed to send fc telemetry message to main thread: {e:?}");
+                // Send errors are expected when things are shutting down
+                if crate::RUNNING.load(Ordering::Relaxed) {
+                    warn!("Failed to send fc telemetry message to main thread: {e:?}");
+                }
             }
         });
 

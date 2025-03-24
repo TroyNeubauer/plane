@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -eu pipefail
 
 BUILD_TYPE=release
 MOUNT_POINT="/home/troy/mnt"
@@ -38,7 +38,7 @@ sudo umount $MOUNT_POINT
 
 echo "Upload complete!"
 
-cargo r --bin gcs -- ./target/thumbv6m-none-eabi/release/flight-controller
+cargo r --bin gcs -- --firmware-bin-path ./target/thumbv6m-none-eabi/release/flight-controller --always-send-controls false
 
 # sleep 2
 # sudo minicom -D /dev/serial/by-id/usb-Embassy_USB-serial_logger-if00

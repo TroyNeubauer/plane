@@ -7,6 +7,7 @@ use log::{debug, error, info, warn};
 use plane_core::{ControlState, FcInput};
 use serial_driver::SerialDriver;
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -24,42 +25,52 @@ use types::*;
 #[derive(Debug, Parser)]
 #[clap(about = "Ground station for laser plane")]
 pub struct Args {
-    #[clap(value_parser)]
+    #[clap(long)]
     firmware_bin_path: Option<String>,
-    #[clap(short = 's', value_parser, default_value = "B000IV2L")]
+    #[clap(short = 's', long, default_value = "B000IV2L")]
     pilot_radio_serial: String,
-    #[clap(short = 'b', value_parser, default_value = "57600")]
+    #[clap(short = 'b', long, default_value = "57600")]
     pilot_radio_baud_rate: u32,
-    #[clap(short = 'd', value_parser, default_value = "0.05")]
+    #[clap(short = 'd', long, default_value = "0.05")]
     deadband: f32,
-    #[clap(value_parser, default_value = "150.0")]
+    #[clap(long, default_value = "150.0")]
     filter_rate_hz: f32,
-    #[clap(value_parser, default_value = "50.0")]
+    #[clap(long, default_value = "50.0")]
     send_rate_hz: f32,
-    #[clap(value_parser, default_value = "0.7")]
+    #[clap(long, default_value = "0.7")]
     alpha: f32,
-    #[clap(value_parser, default_value = "1.6")]
+    #[clap(long, default_value = "1.6")]
     exponent: f32,
-    #[clap(short = 'a', value_parser, default_value = "true")]
-    always_send_controls: bool,
+    #[arg(long, default_missing_value="true", num_args=0..=1)]
+    always_send_controls: Option<bool>,
     #[clap(value_parser, default_value = "./logs")]
     log_dir: Option<String>,
 }
 
+pub static RUNNING: AtomicBool = AtomicBool::new(true);
+
 fn main() -> Result<()> {
     let args = Args::parse();
+    let always_send_controls = args.always_send_controls.unwrap_or(true);
 
     let (text_log_path, serial_tx_log_path, serial_rx_log_path) = if let Some(dir) = args.log_dir {
         let _ = std::fs::create_dir_all(&dir);
 
         let mut text = PathBuf::from(&dir);
+        text.push("gcs");
+        let _ = std::fs::create_dir_all(&text);
+
         text.push(timestamped_file_name("log", "txt"));
 
-        let mut serial_tx = PathBuf::from(&dir);
-        serial_tx.push(timestamped_file_name("serial_tx", "bin"));
+        let mut serial = PathBuf::from(&dir);
+        serial.push("serial");
+        let _ = std::fs::create_dir_all(&serial);
 
-        let mut serial_rx = PathBuf::from(&dir);
-        serial_rx.push(timestamped_file_name("serial_rx", "bin"));
+        let mut serial_tx = PathBuf::from(&serial);
+        serial_tx.push(timestamped_file_name("tx", "bin"));
+
+        let mut serial_rx = PathBuf::from(&serial);
+        serial_rx.push(timestamped_file_name("rx", "bin"));
         (Some(text), Some(serial_tx), Some(serial_rx))
     } else {
         (None, None, None)
@@ -142,7 +153,7 @@ fn main() -> Result<()> {
         s * x.abs().powf(exponent)
     }
 
-    'outer: loop {
+    while RUNNING.load(Ordering::Acquire) {
         tui.draw();
 
         while let Ok(m) = fc_telemetry_rx.try_recv() {
@@ -175,7 +186,7 @@ fn main() -> Result<()> {
             info!("Detected rpi on usb in boot mode. Ready to reflash - exiting");
 
             std::thread::sleep(Duration::from_millis(200));
-            break 'outer;
+            RUNNING.store(false, Ordering::Relaxed);
         }
 
         // Update state based on events
@@ -218,7 +229,7 @@ fn main() -> Result<()> {
                     }
                     GcsEvent::Exit => {
                         info!("Received exit event. Exiting");
-                        break 'outer;
+                        RUNNING.store(false, Ordering::Relaxed);
                     }
                     GcsEvent::ResetFcToUsbBoot => {
                         if armed {
@@ -237,7 +248,7 @@ fn main() -> Result<()> {
 
             if let EventType::Disconnected = &event {
                 info!("Controller disconnected. Exiting");
-                break 'outer;
+                RUNNING.store(false, Ordering::Relaxed);
             }
         }
 
@@ -291,7 +302,7 @@ fn main() -> Result<()> {
                 && last_state_sent.yaw.abs() < MIN_VAL
                 && last_state_sent.roll.abs() < MIN_VAL
                 && last_state_sent.throttle.abs() < MIN_VAL
-                && !args.always_send_controls
+                && !always_send_controls
             {
                 continue;
             }
@@ -334,24 +345,31 @@ async fn usb_scan_task(mut usb_watcher: nusb::hotplug::HotplugWatch) {
     const VENDOR_ID: u16 = 0x2E8A;
     const PRODUCT_ID: u16 = 0x0003;
 
-    if let Ok(mut devs) = nusb::list_devices() {
-        if devs.any(|d| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID) {
-            RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
-            info!("RPI detected");
-        }
+    let mut devices: HashMap<nusb::DeviceId, nusb::DeviceInfo> =
+        nusb::list_devices().unwrap().map(|d| (d.id(), d)).collect();
+
+    if devices
+        .iter()
+        .any(|(_, d)| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID)
+    {
+        RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
+        info!("RPI detected");
     }
 
     while let Some(event) = usb_watcher.next().await {
-        info!("USB event: {event:?}");
         match event {
-            nusb::hotplug::HotplugEvent::Connected(info) => {
-                if info.vendor_id() == VENDOR_ID && info.product_id() == PRODUCT_ID {
-                    RPI_CONNECTED_ON_USB.store(true, Ordering::Relaxed);
-                    info!("RPI detected");
-                }
+            nusb::hotplug::HotplugEvent::Connected(d) => {
+                devices.insert(d.id(), d);
             }
-            _ => {}
+            nusb::hotplug::HotplugEvent::Disconnected(id) => {
+                devices.remove(&id);
+            }
         };
+
+        let rpi_connected = devices
+            .iter()
+            .any(|(_, d)| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID);
+        RPI_CONNECTED_ON_USB.store(rpi_connected, Ordering::Relaxed);
     }
 }
 

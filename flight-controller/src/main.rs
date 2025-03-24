@@ -5,10 +5,11 @@ mod logger;
 mod pwm;
 use pwm::*;
 mod panic_handler;
+mod spawner;
+pub use spawner::*;
 
 use bitflare::BitflareReader;
 use defmt::{error, info, warn};
-use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::flash::{self, Flash};
 use embassy_rp::gpio::{Level, Output};
@@ -16,36 +17,51 @@ use embassy_rp::peripherals::UART1;
 use embassy_rp::uart::{self, Uart, UartTx};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as AsyncMutex;
-use embassy_time::Timer;
+use embassy_time::{Duration, Ticker, Timer};
 use plane_core::{ControlState, FcInput, MAX_FC_INPUT_PAYLOAD, TrimConfig};
 
 bind_interrupts!(struct Irqs {
     UART1_IRQ => uart::InterruptHandler<UART1>;
 });
 
-#[unsafe(no_mangle)]
-fn _embassy_trace_task_new(_executor_id: u32, _task_id: u32) {
-    // defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
-}
-#[unsafe(no_mangle)]
-fn _embassy_trace_task_exec_begin(_executor_id: u32, _task_id: u32) {
-    // defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
-}
-#[unsafe(no_mangle)]
-fn _embassy_trace_task_exec_end(_executor_id: u32, _task_id: u32) {
-    // defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
-}
-#[unsafe(no_mangle)]
-fn _embassy_trace_task_ready_begin(_executor_id: u32, _task_id: u32) {
-    // defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
-}
-#[unsafe(no_mangle)]
-fn _embassy_trace_executor_idle(_executor_id: u32) {
-    // defmt::info!("_embassy_trace_task_new {}", _executor_id);
-}
+// _embassy_trace_executor_idle    537141224
+// _embassy_trace_executor_idle    537141224
+// _embassy_trace_task_ready_begin 537141224 536871384
+// _embassy_trace_task_exec_begin  537141224 536871384
+// _embassy_trace_task_exec_end    537141224 536871384
+// _embassy_trace_executor_idle    537141224
+
+// #[unsafe(no_mangle)]
+// fn _embassy_trace_task_new(_executor_id: u32, _task_id: u32) {
+//     defmt::info!("_embassy_trace_task_new {} {}", _executor_id, _task_id);
+// }
+// #[unsafe(no_mangle)]
+// fn _embassy_trace_task_exec_begin(_executor_id: u32, _task_id: u32) {
+//     defmt::info!(
+//         "_embassy_trace_task_exec_begin {} {}",
+//         _executor_id,
+//         _task_id
+//     );
+// }
+// #[unsafe(no_mangle)]
+// fn _embassy_trace_task_exec_end(_executor_id: u32, _task_id: u32) {
+//     defmt::info!("_embassy_trace_task_exec_end {} {}", _executor_id, _task_id);
+// }
+// #[unsafe(no_mangle)]
+// fn _embassy_trace_task_ready_begin(_executor_id: u32, _task_id: u32) {
+//     defmt::info!(
+//         "_embassy_trace_task_ready_begin {} {}",
+//         _executor_id,
+//         _task_id
+//     );
+// }
+// #[unsafe(no_mangle)]
+// fn _embassy_trace_executor_idle(_executor_id: u32) {
+//     defmt::info!("_embassy_trace_executor_idle {}", _executor_id);
+// }
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(spawner: embassy_executor::Spawner) {
     match main_inner(spawner).await {
         Ok(()) => info!("Main returned Ok(())"),
         Err(e) => loop {
@@ -100,7 +116,7 @@ where
 //
 // }
 
-async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
+async fn arm_esc<'a>(prop: &mut RawPwm<'a>) {
     let _ = prop.set_from_axis_control(1.0);
     Timer::after_secs(3).await;
     let _ = prop.set_from_axis_control(-1.0);
@@ -110,7 +126,7 @@ async fn init_esc<'a>(prop: &mut RawPwm<'a>) {
 
 const MAX_PERC_DFL: f32 = 0.02;
 const MIN_PERC_DFL: f32 = 0.10;
-async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
+async fn main_inner(spawner: embassy_executor::Spawner) -> Result<(), &'static str> {
     logger::set_spawner(spawner);
 
     let p = embassy_rp::init(Default::default());
@@ -129,8 +145,6 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
         MAX_PERC_DFL,
     );
 
-    // init_esc(&mut prop).await;
-
     let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
         p.PWM_SLICE4,
         p.PIN_8,
@@ -140,10 +154,6 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
         MIN_PERC_DFL,
         MAX_PERC_DFL,
     );
-
-    /*prop.set_from_axis_control(0.5);
-    Timer::after_secs(10).await;
-    prop.set_from_axis_control(0.0);*/
 
     let _ = left_aleron.set_from_axis_control(0.0);
     let _ = right_aleron.set_from_axis_control(0.0);
@@ -163,11 +173,17 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
         *radio_serial = Some(uart_tx);
     }
 
-    // spawner
-    //     .spawn(logger_task(uart_tx))
-    //     .map_err(|_| "failed to spawn logger task")?;
-
     Timer::after_secs(2).await;
+
+    warn!("Arming esc");
+    arm_esc(&mut prop).await;
+    info!("ESC armed");
+
+    // spawner.spawn(blink_led(led)).expect("failed to spawn task");
+
+    // spawner.spawn(log_1_hz()).expect("failed to spawn task");
+    // spawner.spawn(log_2_hz()).expect("failed to spawn task");
+    // spawner.spawn(log_4_hz()).expect("failed to spawn task");
 
     let mut armed = false;
     let mut trim_config: TrimConfig = TrimConfig::default();
@@ -208,10 +224,14 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                     }
                 }
 
-                let pitch = flight_controls.pitch;
-                let yaw = flight_controls.yaw;
-                let roll = flight_controls.roll;
-                let throttle = if armed { flight_controls.throttle } else { 0.0 };
+                let pitch = flight_controls.pitch.clamp(-1.0, 1.0);
+                let yaw = flight_controls.yaw.clamp(-1.0, 1.0);
+                let roll = flight_controls.roll.clamp(-1.0, 1.0);
+                let throttle = if armed {
+                    flight_controls.throttle.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
 
                 let _ = left_aleron.set_from_axis_control(roll + trim_config.left_aileron);
                 let _ = right_aleron.set_from_axis_control(roll + trim_config.right_aileron);
@@ -219,5 +239,44 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                 let _ = prop.set_from_axis_control(throttle);
             }
         });
+    }
+}
+
+#[embassy_executor::task]
+async fn blink_led(mut led: Output<'static>) {
+    loop {
+        led.set_high();
+        Timer::after_millis(500).await;
+
+        led.set_low();
+        Timer::after_millis(500).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn log_1_hz() {
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
+    loop {
+        defmt::info!("1Hz log");
+        ticker.next().await;
+    }
+}
+
+#[embassy_executor::task]
+async fn log_2_hz() {
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
+    loop {
+        defmt::info!("2Hz log");
+        ticker.next().await;
+    }
+}
+
+#[embassy_executor::task]
+async fn log_4_hz() {
+    let mut ticker = Ticker::every(Duration::from_millis(1000));
+
+    loop {
+        defmt::info!("4Hz log");
+        ticker.next().await;
     }
 }
