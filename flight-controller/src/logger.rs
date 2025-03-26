@@ -4,7 +4,7 @@ use core::{
 };
 
 use bitflare::BitflareWriter;
-use embassy_executor::Spawner;
+use crate::Spawner;
 use heapless::Vec;
 use plane_core::{FcOutput, MAX_FC_OUTPUT_PACKET};
 
@@ -26,11 +26,11 @@ struct Inner {
     cs_restore: critical_section::RestoreState,
     encoder: defmt::Encoder,
     spawner: Option<Spawner>,
-    buf: Vec<u8, 62>,
+    buf: Vec<u8, 126>,
 }
 
 /// Creates a new async task that sends the given bytes
-fn write_bytes(log_payload: Vec<u8, 62>) {
+fn write_bytes(log_payload: Vec<u8, 126>) {
     let mut packet = [0u8; MAX_FC_OUTPUT_PACKET];
     let mut writer = BitflareWriter::new(&mut packet);
     writer
@@ -43,10 +43,10 @@ fn write_bytes(log_payload: Vec<u8, 62>) {
     let packet = writer.finish();
 
     embassy_futures::block_on(async move {
-        let mut guard = crate::RADIO_SERIAL.lock().await;
-        if let Some(serial) = guard.as_mut() {
-            let _ = serial.write(packet).await;
-        }
+        crate::with_radio_serial(async |radio| {
+            let _ = radio.write(packet).await;
+        })
+        .await;
     });
 
     // TODO: multi buffer allocation scheme

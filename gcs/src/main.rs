@@ -93,7 +93,7 @@ fn main() -> Result<()> {
 
     let mut tui = tui::Tui::new(ratatui::init(), trim, log_rx);
 
-    #[cfg(not(target_os = "macos"))] 
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = gilrs
             .gamepads()
@@ -320,9 +320,9 @@ fn main() -> Result<()> {
             debug!("Sending: {filtered_state:?}");
 
             let command = FcInput::Controls(filtered_state.clone());
-            if fc_command_tx.try_send(command).is_err() {
-                debug!("Failed to send controls command to serial task");
-            }
+            // if fc_command_tx.try_send(command).is_err() {
+            //     debug!("Failed to send controls command to serial task");
+            // }
             last_state_sent = filtered_state.clone();
 
             next_send = now + Duration::from_secs_f32(1.0 / args.send_rate_hz);
@@ -380,7 +380,14 @@ async fn usb_scan_task(mut usb_watcher: nusb::hotplug::HotplugWatch) {
         let rpi_connected = devices
             .iter()
             .any(|(_, d)| d.vendor_id() == VENDOR_ID && d.product_id() == PRODUCT_ID);
-        RPI_CONNECTED_ON_USB.store(rpi_connected, Ordering::Relaxed);
+        let last = RPI_CONNECTED_ON_USB.swap(rpi_connected, Ordering::Relaxed);
+        if last != rpi_connected {
+            if rpi_connected {
+                info!("RPI connected");
+            } else {
+                info!("RPI disconnected");
+            }
+        }
     }
 }
 

@@ -34,11 +34,11 @@ portable-atomic = { version = "1.5", features = ["critical-section"] }
 rand = { version = "0.8.5", default-features = false }
 embedded-sdmmc = "0.7.0"
 
-embassy-embedded-hal = { version = "0.3.0", features = ["defmt"] }
-embassy-sync = { version = "0.6.2", features = ["defmt"] }
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-4096", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] } # "trace"
-embassy-time = { version = "0.4.0", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-rp = { version = "0.4.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
-embassy-usb = { version = "0.4.0", features = ["defmt"] }
-embassy-futures = "0.1.1"
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", features = ["task-arena-size-4096", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "trace"] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-1_000_000"] }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt"] }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git"  }
 small_morse = "0.1.0"

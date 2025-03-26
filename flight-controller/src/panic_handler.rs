@@ -54,15 +54,16 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
         let _ = uart.blocking_write(bytes);
 
-        morse_code_sos()
+        morse_code_sos(20);
+        cortex_m::peripheral::SCB::sys_reset();
     })
 }
 
-fn morse_code_sos() -> ! {
+fn morse_code_sos(count: usize) {
     let led_pin = unsafe { PIN_25::steal() };
     let mut led = Output::new(led_pin, Level::Low);
 
-    loop {
+    for _ in 0..count {
         // Rapid help blick
         for action in small_morse::encode("SOS ") {
             if action.state == small_morse::State::On {
@@ -82,5 +83,6 @@ fn morse_code_sos() -> ! {
 
 #[defmt::panic_handler]
 fn defmt_panic() -> ! {
-    morse_code_sos()
+    morse_code_sos(20);
+    cortex_m::peripheral::SCB::sys_reset();
 }

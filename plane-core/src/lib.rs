@@ -3,11 +3,11 @@
 #[cfg(feature = "std")]
 pub mod byte_rate_counter;
 
+use defmt::{Format, Str};
 use serde::{Deserialize, Serialize};
-use defmt::Format;
 
 pub const MAX_FC_INPUT_PAYLOAD: usize = 32;
-pub const MAX_FC_OUTPUT_PACKET: usize = 64;
+pub const MAX_FC_OUTPUT_PACKET: usize = 128;
 
 #[derive(Clone, Debug, Deserialize, Serialize, Format)]
 pub enum FcInput {
@@ -21,14 +21,14 @@ pub enum FcInput {
 #[derive(Clone, Debug, Deserialize, Serialize, Format)]
 pub enum FcOutput {
     // Save two bytes for the discriminant
-    StringLog(heapless::String<62>),
-    DefmtLog(heapless::Vec<u8, 62>),
+    StringLog(heapless::String<126>),
+    DefmtLog(heapless::Vec<u8, 126>),
     Panic {
-        //62 bytes total
-        file: heapless::String<24>,
+        //70 bytes total
+        file: heapless::String<40>,
         line: u16,
         col: u16,
-        message: heapless::String<34>,
+        message: heapless::String<82>,
     },
 }
 
@@ -70,6 +70,35 @@ pub struct TrimConfig {
     pub elevator_range: f32,
 }
 
+/// Max number of async tasks
+pub const MAX_ASYNC_TASKS: usize = 8;
+pub const MAX_DMA_ACTIONS: usize = 2;
+
+pub struct AsyncState {
+    /// The number of ticks that passed since the last update
+    pub ticks_total: u32,
+    /// Overhead with performing this bookkeeping
+    pub ticks_overhead: u32,
+    pub tasks: heapless::Vec<AsyncTaskState, { MAX_ASYNC_TASKS }>,
+    pub dma_actions: heapless::Vec<DmaAction, { MAX_DMA_ACTIONS }>,
+}
+
+pub struct DmaAction {
+    pub name: Str,
+    /// The number of ticks this DMA transfer was running for
+    pub ticks_running: u32,
+    /// The number of bytes copied
+    pub bytes_copied: u32,
+}
+
+pub struct AsyncTaskState {
+    pub name: Str,
+    /// The number of ticks the CPU was running this task's poll function
+    pub ticks_running: u32,
+    /// The number of ticks where this task was runnable, but the CPU was consumed with other things
+    pub ticks_blocked: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,12 +120,12 @@ mod tests {
     fn gcs_input_sizes() {
         let msg = "[ERROR] test log".try_into().unwrap();
         let _: heapless::Vec<u8, MAX_FC_OUTPUT_PACKET> =
-            postcard::to_vec(&FcOutput::Log(msg)).unwrap();
+            postcard::to_vec(&FcOutput::StringLog(msg)).unwrap();
 
         let msg: heapless::String<{ MAX_FC_OUTPUT_PACKET - 2 }> =
             (0..(MAX_FC_OUTPUT_PACKET - 2)).map(|_| ' ').collect();
 
         let _: heapless::Vec<u8, MAX_FC_OUTPUT_PACKET> =
-            postcard::to_vec(&FcOutput::Log(msg)).unwrap();
+            postcard::to_vec(&FcOutput::StringLog(msg)).unwrap();
     }
 }

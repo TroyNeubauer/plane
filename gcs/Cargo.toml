@@ -28,4 +28,4 @@ futures-util = "0.3.31"
 defmt-decoder = "0.4.0"
 defmt-parser = "0.4.1"
 nusb = "0.1.13"
-embassy-futures = "0.1.1"
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git" }
