@@ -4,6 +4,7 @@
 mod logger;
 mod pwm;
 use pwm::*;
+#[macro_use]
 mod async_task;
 mod panic_handler;
 

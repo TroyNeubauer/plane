@@ -3,8 +3,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use bitflare::BitflareWriter;
 use crate::Spawner;
+use bitflare::BitflareWriter;
 use heapless::Vec;
 use plane_core::{FcOutput, MAX_FC_OUTPUT_PACKET};
 
@@ -42,11 +42,14 @@ fn write_bytes(log_payload: Vec<u8, 126>) {
         .unwrap();
     let packet = writer.finish();
 
-    embassy_futures::block_on(async move {
-        crate::with_radio_serial(async |radio| {
-            let _ = radio.write(packet).await;
-        })
-        .await;
+    crate::log_dma_transfer("Serial Write", defmt::intern!("Serial Write"), move || {
+        embassy_futures::block_on(async move {
+            crate::with_radio_serial(async |radio| {
+                let _ = radio.write(packet).await;
+            })
+            .await;
+        });
+        packet.len()
     });
 
     // TODO: multi buffer allocation scheme

@@ -1,6 +1,6 @@
-use core::{borrow::BorrowMut, cell::RefCell, sync::atomic::AtomicU32};
+use core::{borrow::BorrowMut, cell::RefCell, num::NonZeroU32, sync::atomic::AtomicU32};
 
-use defmt::{Str, info};
+use defmt::{Format, Str, info};
 use embassy_executor::{SpawnError, SpawnToken};
 use embassy_sync::blocking_mutex::{self, raw::CriticalSectionRawMutex};
 use heapless::LinearMap;
@@ -9,16 +9,87 @@ use plane_core::{MAX_ASYNC_TASKS, MAX_DMA_ACTIONS};
 type BlockingLinearMap<K, V, const N: usize> =
     blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<LinearMap<K, V, N>>>;
 
-// TODO: Replace with frozen
 static TASK_NAMES: BlockingLinearMap<u32, defmt::Str, { MAX_ASYNC_TASKS }> =
     BlockingLinearMap::new(RefCell::new(LinearMap::new()));
 
-static TASK_STATE: BlockingLinearMap<u32, TaskState, { MAX_ASYNC_TASKS }> =
-    BlockingLinearMap::new(RefCell::new(LinearMap::new()));
+static STATE: blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<State>> =
+    blocking_mutex::Mutex::new(RefCell::new(State::new()));
 
+#[derive(Default, Clone)]
+struct State {
+    last_update_ticks: Option<NonZeroU32>,
+    ticks_overhead: u32,
+    // TODO: Replace with frozen + atomics
+    task_state: LinearMap<u32, TaskState, { MAX_ASYNC_TASKS }>,
+    dma_state: LinearMap<&'static str, DmaState, { MAX_ASYNC_TASKS }>,
+}
 
+impl State {
+    pub const fn new() -> Self {
+        Self {
+            last_update_ticks: None,
+            ticks_overhead: 0,
+            task_state: LinearMap::new(),
+            dma_state: LinearMap::new(),
+        }
+    }
+}
+
+#[derive(Default, Clone)]
 struct TaskState {
-    //
+    last_ready_begin_ticks: Option<NonZeroU32>,
+    last_exec_begin_ticks: Option<NonZeroU32>,
+    /// Sum of runtime in this tasks's poll function
+    total_executing_ticks: u32,
+    /// Sum of ticks between future being woken and starting execution
+    total_blocked_ticks: u32,
+}
+
+#[derive(Clone)]
+struct DmaState {
+    total_bytes: u32,
+    total_executing_ticks: u32,
+    name: Str,
+}
+
+/// Runs and counts the runtime of `f`,
+/// committing the number of bytes returned by f and the execution time to monitoring
+pub fn log_dma_transfer(str_name: &'static str, defmt_name: Str, f: impl FnOnce() -> usize) {
+    let start = embassy_time_driver::now();
+    let bytes = f();
+    let end = embassy_time_driver::now();
+    let elapsed = end.saturating_sub(start) as u32;
+
+    STATE.lock(|state| {
+        let mut state = state.borrow_mut();
+        let map = &mut state.dma_state;
+        let mut entry = match map.get_mut(str_name) {
+            Some(e) => e,
+            None => {
+                if map
+                    .insert(
+                        str_name,
+                        DmaState {
+                            total_bytes: 0,
+                            total_executing_ticks: 0,
+                            name: defmt_name,
+                        },
+                    )
+                    .is_err()
+                {
+                    defmt::warn!(
+                        "Too many dma transfers! {} is number {}",
+                        defmt_name,
+                        map.len()
+                    );
+                }
+                map.get_mut(str_name).unwrap()
+            }
+        };
+    });
+
+    let overhead_end = embassy_time_driver::now();
+    let overhead = overhead_end - end;
 }
 
 /*

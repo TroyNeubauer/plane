@@ -42,3 +42,4 @@ embassy-rp = { git = "https://github.com/embassy-rs/embassy.git", features = ["d
 embassy-usb = { git = "https://github.com/embassy-rs/embassy.git", features = ["defmt"] }
 embassy-futures = { git = "https://github.com/embassy-rs/embassy.git"  }
 small_morse = "0.1.0"
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git"  }
