@@ -1,14 +1,25 @@
 use core::{borrow::BorrowMut, cell::RefCell, sync::atomic::AtomicU32};
 
-use defmt::info;
+use defmt::{Str, info};
 use embassy_executor::{SpawnError, SpawnToken};
 use embassy_sync::blocking_mutex::{self, raw::CriticalSectionRawMutex};
-use plane_core::MAX_ASYNC_TASKS;
+use heapless::LinearMap;
+use plane_core::{MAX_ASYNC_TASKS, MAX_DMA_ACTIONS};
 
-static TASK_NAMES: blocking_mutex::Mutex<
-    CriticalSectionRawMutex,
-    RefCell<heapless::FnvIndexMap<u32, defmt::Str, MAX_ASYNC_TASKS>>,
-> = blocking_mutex::Mutex::new(RefCell::new(heapless::FnvIndexMap::new()));
+type BlockingLinearMap<K, V, const N: usize> =
+    blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<LinearMap<K, V, N>>>;
+
+// TODO: Replace with frozen
+static TASK_NAMES: BlockingLinearMap<u32, defmt::Str, { MAX_ASYNC_TASKS }> =
+    BlockingLinearMap::new(RefCell::new(LinearMap::new()));
+
+static TASK_STATE: BlockingLinearMap<u32, TaskState, { MAX_ASYNC_TASKS }> =
+    BlockingLinearMap::new(RefCell::new(LinearMap::new()));
+
+
+struct TaskState {
+    //
+}
 
 /*
 pub struct AsyncState {
