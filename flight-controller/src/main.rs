@@ -119,7 +119,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     // pi pico visible LED
     let mut led = Output::new(p.PIN_25, Level::Low);
 
-    let (mut elevator, mut prop) = RawPwm::new_ab(
+    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
         p.PWM_SLICE3,
         p.PIN_6,
         p.PIN_7,
@@ -131,7 +131,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     // init_esc(&mut prop).await;
 
-    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
+    let (mut rudder, mut elevator) = RawPwm::new_ab(
         p.PWM_SLICE4,
         p.PIN_8,
         p.PIN_9,
@@ -140,6 +140,8 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
         MIN_PERC_DFL,
         MAX_PERC_DFL,
     );
+
+    let mut prop = RawPwm::new(p.PWM_SLICE5, p.PIN_10, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
 
     /*prop.set_from_axis_control(0.5);
     Timer::after_secs(10).await;
