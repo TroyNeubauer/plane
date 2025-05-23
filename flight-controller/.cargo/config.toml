@@ -1,8 +1,13 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
+# Change to rp235x if you're using the pico 2!
+# they look similar but are not the same
 # runner = "probe-rs run --chip RP2040"
 runner = "elf2uf2-rs -d"
+# TODO(Dhruv) NOCOMMIT: pass the RP2350 runner to elf2uf2-rs 
+# runner = "elf2uf2-rs --family 0xe48bff59 -d"
 
 [build]
+#TODO(Dhruv) should be v8m no v6m
 target = "thumbv6m-none-eabi"
 
 [env]
