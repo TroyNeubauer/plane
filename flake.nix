@@ -15,6 +15,10 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
+        elf2uf2-rs = pkgs.elf2uf2-rs.overrideAttrs {
+          src = fetchGit { url = "https://github.com/ninjasource/elf2uf2-rs"; ref = "pico2-support"; rev = "5813dd0b54dde3aed93822e196f67715a2de8c5d"; };
+        };
+
         toolchain = with fenix.packages.${system};
           combine [
             stable.rustc
