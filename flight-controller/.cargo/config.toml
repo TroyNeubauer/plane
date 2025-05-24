@@ -2,12 +2,13 @@
 runner = "elf2uf2-rs -d"
 
 [target.thumbv8m.main-none-eabihf]
+# Alternate runners:
+#runner = "picotool load -u -v -x -t elf"
 #runner = "probe-rs run --chip RP235x"
 runner = "elf2uf2-rs --family 0xe48bff59 -d"
-#runner = "picotool load -u -v -x -t elf"
  
 [build]
-#TODO(Dhruv) should be v8m no v6m
+# TODO(Dhruv) select a reasonable default or make the default not compile
 #target = "thumbv6m-none-eabi"
 target = "thumbv8m.main-none-eabihf"
 
