@@ -4,7 +4,7 @@ set -e
 
 BUILD_TYPE=release
 MOUNT_POINT="/home/troy/mnt"
-TARGET="thumbv6m-none-eabi"
+TARGET="thumbv8m.main-none-eabi"
 
 # Build the project
 echo "Building project..."
@@ -30,7 +30,7 @@ sudo mount -o uid=$(id -u),gid=$(id -g) $DEVICE_PARTITION $MOUNT_POINT
 
 # Run the upload command
 echo "Uploading firmware to Pico..."
-elf2uf2-rs -d target/${TARGET}/${BUILD_TYPE}/flight-controller $MOUNT_POINT
+elf2uf2-rs --family 0xe48bff59 -d target/${TARGET}/${BUILD_TYPE}/flight-controller $MOUNT_POINT
 
 # Unmount after upload
 sync
