@@ -47,3 +47,6 @@ embassy-rp = { version = "0.4.0", features = ["defmt", "unstable-pac", "time-dri
 
 [target."thumbv8m.main-none-eabihf".dependencies]
 embassy-rp = { version = "0.4.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rp235xa)', 'cfg(rp2040)'] }
