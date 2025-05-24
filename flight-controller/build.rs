@@ -35,7 +35,7 @@ fn main() {
             .unwrap()
             .write_all(include_bytes!("rp235xa.x"))
             .unwrap();
-    } else if env::var("TARGET").is_ok_and(|target| target == "thumbv6m-none-eabi")  {
+    } else if env::var("TARGET").is_ok_and(|target| target == "thumbv6m-none-eabi") {
         // Pico 1
         println!("cargo:rustc-link-arg-bins=-Tlink-rp.x");
         File::create(out.join("memory.x"))
@@ -43,7 +43,10 @@ fn main() {
             .write_all(include_bytes!("rp2040.x"))
             .unwrap();
     } else {
-        panic!("got target {:?}, expected thumbv8m or thumbv6m", env::var("TARGET"))
+        panic!(
+            "got target {:?}, expected thumbv8m or thumbv6m",
+            env::var("TARGET")
+        )
     }
 
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
