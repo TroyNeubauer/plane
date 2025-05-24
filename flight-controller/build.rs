@@ -19,6 +19,9 @@ fn main() {
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
     println!("cargo:rustc-link-search={}", out.display());
 
+    println!("cargo::rustc-check-cfg=cfg(rp235xa)");
+    println!("cargo::rustc-check-cfg=cfg(rp2040)");
+
     // By default, Cargo will re-run a build script whenever
     // any file in the project changes. By specifying `memory.x`
     // here, we ensure the build script is only re-run when
