@@ -29,6 +29,7 @@
             stable.rust-std
             stable.rust-src
             targets.thumbv6m-none-eabi.stable.rust-std
+            targets."thumbv8m.main-none-eabihf".stable.rust-std
           ];
 
         shell = pkgs.mkShell {

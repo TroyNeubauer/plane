@@ -206,7 +206,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                     FcInput::Arm => armed = true,
                     FcInput::Disarm => armed = false,
                     FcInput::ResetToUsbBoot => {
-                        embassy_rp::rom_data::reset_to_usb_boot(0, 0);
+                        // embassy_rp::rom_data::reset_to_usb_boot(0, 0);
                     }
                 }
 
