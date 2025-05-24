@@ -169,7 +169,10 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     //     .spawn(logger_task(uart_tx))
     //     .map_err(|_| "failed to spawn logger task")?;
 
-    Timer::after_secs(2).await;
+    loop {
+        led.toggle();
+        Timer::after_secs(2).await;
+    }
 
     let mut armed = false;
     let mut trim_config: TrimConfig = TrimConfig::default();
