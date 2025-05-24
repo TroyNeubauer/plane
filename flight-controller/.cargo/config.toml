@@ -8,8 +8,6 @@ runner = "elf2uf2-rs -d"
 runner = "elf2uf2-rs --family 0xe48bff59 -d"
  
 [build]
-# TODO(Dhruv) select a reasonable default or make the default not compile
-#target = "thumbv6m-none-eabi"
 target = "thumbv8m.main-none-eabihf"
 
 [env]

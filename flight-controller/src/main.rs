@@ -208,9 +208,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                     }
                     FcInput::Arm => armed = true,
                     FcInput::Disarm => armed = false,
-                    FcInput::ResetToUsbBoot => {
-                        // embassy_rp::rom_data::reset_to_usb_boot(0, 0);
-                    }
+                    FcInput::ResetToUsbBoot => reboot_to_bootloader(),
                 }
 
                 let pitch = flight_controls.pitch;
@@ -225,4 +223,19 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
             }
         });
     }
+}
+
+fn reboot_to_bootloader() {
+    const REBOOT_NO_RETURN_ON_SUCCESS: u32 = 0x0100;
+
+    /// A normal reboot on the pi pico2
+    const REBOOT_TYPE_NORMAL: u32 = 0x0000 | REBOOT_NO_RETURN_ON_SUCCESS;
+    /// A reboot-to-bootloader on the pi pico2
+    const REBOOT_TYPE_BOOTSEL: u32 = 0x0002 | REBOOT_NO_RETURN_ON_SUCCESS;
+
+    #[cfg(rp2040)]
+    embassy_rp::rom_data::reset_to_usb_boot(0, 0);
+
+    #[cfg(rp235xa)]
+    embassy_rp::rom_data::reboot_ns(REBOOT_TYPE_BOOTSEL, 0, 0, 0);
 }

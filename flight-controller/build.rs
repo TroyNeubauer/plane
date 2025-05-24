@@ -35,6 +35,8 @@ fn main() {
             .unwrap()
             .write_all(include_bytes!("rp235xa.x"))
             .unwrap();
+
+        println!("cargo:rustc-cfg=rp235xa")
     } else if env::var("TARGET").is_ok_and(|target| target == "thumbv6m-none-eabi") {
         // Pico 1
         println!("cargo:rustc-link-arg-bins=-Tlink-rp.x");
@@ -42,6 +44,8 @@ fn main() {
             .unwrap()
             .write_all(include_bytes!("rp2040.x"))
             .unwrap();
+
+        println!("cargo:rustc-cfg=rp2040")
     } else {
         panic!(
             "got target {:?}, expected thumbv8m or thumbv6m",
