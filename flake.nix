@@ -1,8 +1,6 @@
 {
   description = "Rust Embedded Setup for Raspberry Pi Pico with fenix and probe-rs-tools";
 
-  # TODO(Dhruv) NOCOMMIT: nixify cargo install --git https://github.com/ninjasource/elf2uf2-rs --branch pico2-support
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
