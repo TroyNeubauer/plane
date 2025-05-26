@@ -1,9 +1,14 @@
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
-# runner = "probe-rs run --chip RP2040"
+[target.thumbv6m-none-eabi]
 runner = "elf2uf2-rs -d"
 
+[target.thumbv8m.main-none-eabihf]
+# Alternate runners:
+#runner = "picotool load -u -v -x -t elf"
+#runner = "probe-rs run --chip RP235x"
+runner = "elf2uf2-rs --family 0xe48bff59 -d"
+ 
 [build]
-target = "thumbv6m-none-eabi"
+target = "thumbv8m.main-none-eabihf"
 
 [env]
 DEFMT_LOG = "debug"

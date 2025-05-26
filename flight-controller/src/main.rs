@@ -119,7 +119,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
     // pi pico visible LED
     let mut led = Output::new(p.PIN_25, Level::Low);
 
-    let (mut elevator, mut prop) = RawPwm::new_ab(
+    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
         p.PWM_SLICE3,
         p.PIN_6,
         p.PIN_7,
@@ -131,7 +131,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
 
     // init_esc(&mut prop).await;
 
-    let (mut left_aleron, mut right_aleron) = RawPwm::new_ab(
+    let (mut rudder, mut elevator) = RawPwm::new_ab(
         p.PWM_SLICE4,
         p.PIN_8,
         p.PIN_9,
@@ -140,6 +140,8 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
         MIN_PERC_DFL,
         MAX_PERC_DFL,
     );
+
+    let mut prop = RawPwm::new(p.PWM_SLICE5, p.PIN_10, 50, 64, MIN_PERC_DFL, MAX_PERC_DFL);
 
     /*prop.set_from_axis_control(0.5);
     Timer::after_secs(10).await;
@@ -203,9 +205,7 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
                     }
                     FcInput::Arm => armed = true,
                     FcInput::Disarm => armed = false,
-                    FcInput::ResetToUsbBoot => {
-                        embassy_rp::rom_data::reset_to_usb_boot(0, 0);
-                    }
+                    FcInput::ResetToUsbBoot => reboot_to_bootloader(),
                 }
 
                 let pitch = flight_controls.pitch;
@@ -220,4 +220,19 @@ async fn main_inner(spawner: Spawner) -> Result<(), &'static str> {
             }
         });
     }
+}
+
+fn reboot_to_bootloader() {
+    const REBOOT_NO_RETURN_ON_SUCCESS: u32 = 0x0100;
+
+    /// A normal reboot on the pi pico2
+    const REBOOT_TYPE_NORMAL: u32 = 0x0000 | REBOOT_NO_RETURN_ON_SUCCESS;
+    /// A reboot-to-bootloader on the pi pico2
+    const REBOOT_TYPE_BOOTSEL: u32 = 0x0002 | REBOOT_NO_RETURN_ON_SUCCESS;
+
+    #[cfg(rp2040)]
+    embassy_rp::rom_data::reset_to_usb_boot(0, 0);
+
+    #[cfg(rp235xa)]
+    embassy_rp::rom_data::reboot_ns(REBOOT_TYPE_BOOTSEL, 0, 0, 0);
 }
