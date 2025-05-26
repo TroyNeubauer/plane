@@ -3,6 +3,7 @@ use core::{borrow::BorrowMut, cell::RefCell, num::NonZeroU32, sync::atomic::Atom
 use defmt::{Format, Str, info};
 use embassy_executor::{SpawnError, SpawnToken};
 use embassy_sync::blocking_mutex::{self, raw::CriticalSectionRawMutex};
+use embassy_time::Duration;
 use heapless::LinearMap;
 use plane_core::{MAX_ASYNC_TASKS, MAX_DMA_ACTIONS};
 
@@ -15,7 +16,7 @@ static TASK_NAMES: BlockingLinearMap<u32, defmt::Str, { MAX_ASYNC_TASKS }> =
 static STATE: blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<State>> =
     blocking_mutex::Mutex::new(RefCell::new(State::new()));
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Format)]
 struct State {
     last_update_ticks: Option<NonZeroU32>,
     ticks_overhead: u32,
@@ -35,7 +36,7 @@ impl State {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Format)]
 struct TaskState {
     last_ready_begin_ticks: Option<NonZeroU32>,
     last_exec_begin_ticks: Option<NonZeroU32>,
@@ -43,17 +44,33 @@ struct TaskState {
     total_executing_ticks: u32,
     /// Sum of ticks between future being woken and starting execution
     total_blocked_ticks: u32,
+    overhead_ticks: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Format)]
 struct DmaState {
     total_bytes: u32,
     total_executing_ticks: u32,
     name: Str,
 }
 
+#[embassy_executor::task]
+pub async fn monitor_task(poll_rate: Duration) {
+    let mut ticker = Ticker::every(poll_rate);
+    loop {
+        STATE.lock(|state| {
+            let mut state = state.borrow();
+            info!("{}", state);
+        });
+
+        ticker.next().await;
+    }
+}
+
 /// Runs and counts the runtime of `f`,
 /// committing the number of bytes returned by f and the execution time to monitoring
+#[unsafe(no_mangle)]
+#[inline(never)]
 pub fn log_dma_transfer(str_name: &'static str, defmt_name: Str, f: impl FnOnce() -> usize) {
     let start = embassy_time_driver::now();
     let bytes = f();
@@ -86,10 +103,10 @@ pub fn log_dma_transfer(str_name: &'static str, defmt_name: Str, f: impl FnOnce(
                 map.get_mut(str_name).unwrap()
             }
         };
-    });
 
-    let overhead_end = embassy_time_driver::now();
-    let overhead = overhead_end - end;
+        let overhead_end = embassy_time_driver::now();
+        state.ticks_overhead += overhead_end.saturating_sub(end) as u32;
+    });
 }
 
 /*

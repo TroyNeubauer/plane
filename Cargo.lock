@@ -242,11 +242,11 @@ checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 [[package]]
 name = "bitflare"
 version = "0.0.0"
-source = "git+https://github.com/TroyNeubauer/bitflare.git#87e3466c762160b09d7333890039353f03d927d1"
+source = "git+https://github.com/TroyNeubauer/bitflare.git#9263f4eee52c7b03723fc90e91378d54ecdbd865"
 dependencies = [
  "crc",
  "defmt",
- "heapless 0.7.17",
+ "heapless 0.8.0",
  "log",
  "memchr",
 ]
@@ -1122,7 +1122,7 @@ dependencies = [
  "embedded-storage",
  "fixed",
  "fixed-macro",
- "heapless 0.7.17",
+ "heapless 0.8.0",
  "plane-core",
  "portable-atomic",
  "postcard",
@@ -1379,7 +1379,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdc6457c0eb62c71aac4bc17216026d8410337c4126773b9c5daba343f17964f"
 dependencies = [
  "atomic-polyfill",
- "defmt",
  "hash32 0.2.1",
  "rustc_version 0.4.1",
  "serde",
@@ -1393,7 +1392,9 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
 dependencies = [
+ "defmt",
  "hash32 0.3.1",
+ "serde",
  "stable_deref_trait",
 ]
 
@@ -1939,7 +1940,7 @@ version = "0.1.0"
 dependencies = [
  "bitflare",
  "defmt",
- "heapless 0.7.17",
+ "heapless 0.8.0",
  "postcard",
  "serde",
 ]

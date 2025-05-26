@@ -6,7 +6,7 @@ resolver = "3"
 postcard = "1.1.1"
 bitflare = { git = "https://github.com/TroyNeubauer/bitflare.git", default-features = false }
 defmt = "0.3"
-heapless = { version = "0.7", features = ["defmt-impl"] }
+heapless = { version = "0.8", features = ["defmt-03", "serde"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
 
 [profile.release]
