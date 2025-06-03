@@ -18,7 +18,7 @@
         };
 
         sdcc = pkgs.sdcc.overrideAttrs {
-          outputs = ["out" "doc"] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ "man" ];
+          outputs = ["out" "doc"] ++ pkgs.lib.optionals (!pkgs.stdenv.isDarwin) [ "man" ];
         };
         
 
